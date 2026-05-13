@@ -1,4 +1,4 @@
-import type { FollowUpMessage, LookupRequest, LookupResult } from "./types";
+import type { EpisodeChatMessage, FollowUpMessage, LookupRequest, LookupResult } from "./types";
 
 type ResponsesApiResult = {
   output_text?: string;
@@ -13,8 +13,17 @@ type ResponsesApiResult = {
   };
 };
 
-export async function requestLookup(apiKey: string, request: LookupRequest): Promise<LookupResult> {
-  const data = await callResponsesApi(apiKey, request.model, buildLookupPrompt(request));
+export type PromptOptions = {
+  /** Free-form learner notes appended to every prompt. */
+  customPrompt?: string;
+};
+
+export async function requestLookup(
+  apiKey: string,
+  request: LookupRequest,
+  options: PromptOptions = {},
+): Promise<LookupResult> {
+  const data = await callResponsesApi(apiKey, request.model, buildLookupPrompt(request, options));
   const text = extractOutputText(data);
   return parseLookupResult(text);
 }
@@ -45,20 +54,25 @@ export async function listOpenAiModels(apiKey: string): Promise<string[]> {
 export async function requestFollowUp(
   apiKey: string,
   request: LookupRequest,
-  messages: FollowUpMessage[],
+  messages: FollowUpMessage[] | EpisodeChatMessage[],
   question: string,
+  options: PromptOptions = {},
 ) {
-  const prior = messages.map((message) => `${message.role}: ${message.content}`).join("\n");
+  const teacher = ((options.customPrompt ?? "").trim() || TEACHER_GUIDANCE);
+  const prior = messages
+    .map((message) => `${message.role}: ${message.content}`)
+    .join("\n");
   const prompt = [
-    "You are helping a Russian-speaking learner understand Dutch subtitles.",
-    "Answer the user's follow-up question in the target language unless they ask otherwise.",
-    "Return plain text only. Do not use Markdown formatting, headings, bullet lists, tables, code fences, or emphasis markers.",
-    "Keep the answer compact and readable as one or two short paragraphs.",
+    teacher,
+    "",
+    `Answer the learner's follow-up question in ${request.targetLanguage} unless they explicitly ask for Dutch.`,
+    "Plain text only: no Markdown, no headings, no bullet lists, no code fences.",
+    "Keep the answer compact — one or two short paragraphs.",
     "",
     `Target language: ${request.targetLanguage}`,
     `Selected text: ${request.targetText}`,
     `Subtitle context: ${request.cueText}`,
-    prior ? `Previous follow-up messages:\n${prior}` : "",
+    prior ? `Previous messages in this episode chat:\n${prior}` : "",
     `Question: ${question}`,
   ]
     .filter(Boolean)
@@ -78,7 +92,7 @@ async function callResponsesApi(apiKey: string, model: string, input: string): P
     body: JSON.stringify({
       model,
       input,
-      max_output_tokens: 450,
+      max_output_tokens: 700,
     }),
   });
 
@@ -97,21 +111,76 @@ async function callResponsesApi(apiKey: string, model: string, input: string): P
   return data;
 }
 
-function buildLookupPrompt(request: LookupRequest) {
+/* ------------------------------------------------------------------ *
+ *  Prompt construction                                               *
+ *  Designed around how a real Dutch teacher would read the cue       *
+ *  before answering — separable verbs, idioms, pronominal adverbs,   *
+ *  modal chains.                                                     *
+ * ------------------------------------------------------------------ */
+
+export const TEACHER_GUIDANCE = [
+  "You are an experienced Dutch language teacher helping a learner understand a real subtitle line.",
+  "Critical: do NOT translate the selected text in isolation. First read the WHOLE subtitle context, then",
+  "decide what the selected text actually means here. Specifically check for:",
+  "- Separable verbs (scheidbare werkwoorden): the prefix may live elsewhere in the sentence",
+  "  (e.g. \"Daar ga ik nu wat aan doen\" → the verb is \"ergens iets aan doen\", lemma \"aandoen / aan doen\",",
+  "  not bare \"doen\"; \"Hij belt mij op\" → \"opbellen\"; \"Leg het uit\" → \"uitleggen\").",
+  "- Pronominal adverbs (eraan, ermee, ervan, erover, daarop, hierin) that pair with a particle.",
+  "- Fixed expressions and idioms (\"zin hebben in\", \"rekening houden met\", \"de moeite waard\", \"er is\").",
+  "- Modal / auxiliary chains (\"moeten blijven groeien\", \"gaan doen\", \"laten zien\") — note the main verb.",
+  "- Diminutives, weak vs. strong verb forms, and whether a word is a noun, verb, adjective or particle here.",
+  "- False friends with the learner's target language when relevant.",
+  "If the selected word is part of a larger construction, your translation, lemma, and explanation must",
+  "describe that whole construction — never just the literal word.",
+].join("\n");
+
+function buildLookupPrompt(request: LookupRequest, options: PromptOptions) {
+  const teacher = ((options.customPrompt ?? "").trim() || TEACHER_GUIDANCE);
+
+  if (request.mode === "sentence") {
+    return [
+      teacher,
+      "",
+      "The learner has selected a full Dutch sentence and wants a natural translation plus the",
+      "one or two grammar points that matter most for understanding it (not an exhaustive parse).",
+      "",
+      `Target language for the answer: ${request.targetLanguage}`,
+      `Selected sentence: ${request.targetText}`,
+      `Subtitle context (the cue around it): ${request.cueText}`,
+      "",
+      "Return only valid JSON, no Markdown, no code fences.",
+      "Return exactly this JSON shape:",
+      '{"translation":"...","lemma":"","partOfSpeech":"sentence","explanation":"..."}',
+      "- translation: natural, idiomatic, not literal.",
+      "- explanation: one or two short sentences explaining the grammar / idiom that matters here.",
+    ].join("\n");
+  }
+
+  const modeLabel =
+    request.mode === "selection"
+      ? "A multi-word selection. Treat it as a phrase, not a single word."
+      : "A single word click. Check whether the surrounding sentence makes this part of a larger construction.";
+
   return [
-    "You are a concise Dutch language tutor.",
-    "Return only valid JSON. Do not wrap it in Markdown.",
-    "Explain the selected Dutch subtitle text in context.",
+    teacher,
     "",
+    `Lookup mode: ${modeLabel}`,
     `Target language for the answer: ${request.targetLanguage}`,
-    `Lookup mode: ${request.mode}`,
     `Selected text: ${request.targetText}`,
     `Subtitle context: ${request.cueText}`,
     "",
-    "Return this exact JSON shape:",
+    "Return only valid JSON, no Markdown, no code fences.",
+    "Return exactly this JSON shape:",
     '{"translation":"...","lemma":"...","partOfSpeech":"...","explanation":"..."}',
-    "Use empty strings for lemma or partOfSpeech if they are not useful.",
-    "Keep explanation to one short sentence.",
+    "- translation: the meaning of the selected text *as it actually functions in this sentence*.",
+    "  If it is part of a separable verb, idiom, or fixed expression, translate the WHOLE construction",
+    "  and indicate which extra words belong to it (e.g. \"to do something about it — pairs with 'aan'\").",
+    "- lemma: dictionary form. For separable verbs use the joined infinitive (aandoen, opbellen,",
+    "  uitleggen). For idioms use the canonical expression. Use the article for nouns (de/het).",
+    "- partOfSpeech: in the learner's target language. If the word here is only part of a larger",
+    "  construction, say so explicitly (e.g. \"глагол (часть отделяемого aandoen)\").",
+    "- explanation: one or two short sentences. Highlight what is non-obvious for a learner —",
+    "  separated prefix, idiom, register, false-friend pitfall, irregular form.",
   ].join("\n");
 }
 

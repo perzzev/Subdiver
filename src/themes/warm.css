@@ -1,0 +1,68 @@
+/* Warm study desk — cozy notebook. Beige paper, deep green, ochre accents. */
+
+:root[data-theme="warm"] {
+  --surface-bg: #f4ecdc;
+  --surface-card: #fbf6e8;
+  --surface-elevated: #fffaef;
+  --surface-soft: rgba(251, 246, 232, 0.75);
+
+  --text-primary: #1f2622;
+  --text-strong: #0e1410;
+  --text-muted: #5a5e4d;
+
+  --accent: #2c5e4a;
+  --accent-soft: rgba(201, 138, 58, 0.18);
+  --accent-strong: #1c4332;
+  --accent-fg: #fffaef;
+
+  --border: rgba(74, 60, 40, 0.16);
+  --border-strong: rgba(74, 60, 40, 0.32);
+
+  --shadow-card: 0 8px 22px rgba(94, 75, 40, 0.08);
+  --shadow-lookup: 0 18px 38px rgba(94, 75, 40, 0.18);
+
+  --cue-font: "Source Serif 4", "Charter", "Iowan Old Style", Georgia, serif;
+  --cue-size: 22px;
+  --cue-line-height: 1.55;
+  --max-reader-width: 780px;
+}
+
+:root[data-theme="warm"] body {
+  background:
+    linear-gradient(180deg, #f7efde 0%, #f0e6ce 100%),
+    repeating-linear-gradient(90deg, rgba(58, 72, 64, 0.05) 0 1px, transparent 1px 72px);
+}
+
+:root[data-theme="warm"] .word-token {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 5px;
+}
+
+:root[data-theme="warm"] .word-token:hover {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+:root[data-theme="warm"] .transcript {
+  gap: 0;
+}
+:root[data-theme="warm"] .cue-row {
+  border-bottom: 1px dashed var(--border);
+  border-radius: 0;
+}
+:root[data-theme="warm"] .cue-row:last-child {
+  border-bottom: none;
+}
+
+:root[data-theme="warm"] .inline-lookup {
+  background: #fef3d7;
+  border-color: rgba(201, 138, 58, 0.4);
+  border-left-color: #c98a3a;
+  box-shadow: 0 6px 20px rgba(201, 138, 58, 0.18);
+}
+
+:root[data-theme="warm"] .continue-card {
+  background: linear-gradient(140deg, var(--surface-card), rgba(44, 94, 74, 0.15));
+}

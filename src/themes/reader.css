@@ -1,0 +1,47 @@
+/* Reader / Kindle — quiet library. Cream paper, ink text, indigo accent. */
+
+:root[data-theme="reader"] {
+  --surface-bg: #fbf7ee;
+  --surface-card: #fffaee;
+  --surface-elevated: #ffffff;
+  --surface-soft: rgba(255, 250, 238, 0.8);
+
+  --text-primary: #1a1814;
+  --text-strong: #0e0d0a;
+  --text-muted: #6a6358;
+
+  --accent: #3a3f7a;
+  --accent-soft: rgba(58, 63, 122, 0.13);
+  --accent-strong: #1e2256;
+  --accent-fg: #fbf7ee;
+
+  --border: rgba(74, 65, 50, 0.16);
+  --border-strong: rgba(74, 65, 50, 0.28);
+
+  --shadow-card: 0 6px 18px rgba(70, 56, 30, 0.06);
+  --shadow-lookup: 0 14px 32px rgba(70, 56, 30, 0.14);
+
+  --cue-font: "Iowan Old Style", "Source Serif 4", "Charter", Georgia, "Times New Roman", serif;
+  --cue-size: 23px;
+  --cue-line-height: 1.6;
+  --max-reader-width: 720px;
+}
+
+:root[data-theme="reader"] body {
+  background:
+    linear-gradient(180deg, #fdf9ef 0%, #f6f0df 100%);
+}
+
+:root[data-theme="reader"] .word-token {
+  text-decoration-thickness: 1px;
+  text-underline-offset: 6px;
+}
+
+:root[data-theme="reader"] .inline-lookup {
+  border-radius: 4px;
+  border-left-width: 4px;
+}
+
+:root[data-theme="reader"] .inline-lookup-translation {
+  font-style: italic;
+}

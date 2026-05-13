@@ -1,0 +1,71 @@
+/* Cinema dark — the show is the star. Dark surfaces, amber accent. */
+
+:root[data-theme="cinema"] {
+  --surface-bg: #0e0f12;
+  --surface-card: #16181d;
+  --surface-elevated: #1c1f25;
+  --surface-soft: rgba(28, 31, 37, 0.6);
+
+  --text-primary: #e8e6e1;
+  --text-strong: #ffffff;
+  --text-muted: #8d8b87;
+
+  --accent: #e8b14a;
+  --accent-soft: rgba(232, 177, 74, 0.15);
+  --accent-strong: #f5c875;
+  --accent-fg: #0e0f12;
+
+  --border: rgba(232, 230, 225, 0.10);
+  --border-strong: rgba(232, 230, 225, 0.22);
+
+  --shadow-card: 0 10px 24px rgba(0, 0, 0, 0.3);
+  --shadow-lookup: 0 18px 40px rgba(0, 0, 0, 0.5);
+
+  --cue-font: "Inter Tight", "Helvetica Neue", "Inter", system-ui, sans-serif;
+  --cue-size: 22px;
+  --cue-line-height: 1.45;
+  --max-reader-width: 820px;
+}
+
+:root[data-theme="cinema"] body {
+  background:
+    radial-gradient(circle at 50% -10%, #1c1f25 0%, #0e0f12 60%);
+}
+
+:root[data-theme="cinema"] .word-token {
+  text-decoration-color: rgba(232, 177, 74, 0.25);
+}
+:root[data-theme="cinema"] .word-token:hover {
+  background: rgba(232, 177, 74, 0.18);
+  color: var(--accent-strong);
+  text-decoration-color: var(--accent);
+}
+
+:root[data-theme="cinema"] .cue-time {
+  color: rgba(232, 230, 225, 0.42);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+:root[data-theme="cinema"] .cue-row:hover {
+  background: rgba(232, 177, 74, 0.04);
+}
+
+:root[data-theme="cinema"] .inline-lookup {
+  background: var(--surface-elevated);
+  border-color: var(--border-strong);
+}
+
+:root[data-theme="cinema"] .continue-card {
+  background: linear-gradient(140deg, #1c1f25, rgba(232, 177, 74, 0.10));
+}
+
+:root[data-theme="cinema"] .sample-card,
+:root[data-theme="cinema"] .home-band,
+:root[data-theme="cinema"] .reader-strip {
+  background: var(--surface-card);
+}
+
+:root[data-theme="cinema"] .dropzone {
+  background: rgba(28, 31, 37, 0.4);
+}

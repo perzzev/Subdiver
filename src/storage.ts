@@ -1,11 +1,21 @@
-import type { LookupResult, ReaderProgress, TranscriptDocument } from "./types";
+import type {
+  EpisodeChat,
+  EpisodeChatMessage,
+  LookupResult,
+  ReaderProgress,
+  TranscriptDocument,
+} from "./types";
 
 const DB_NAME = "ondertiteling";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const TRANSCRIPT_STORE = "transcripts";
 const CACHE_STORE = "lookupCache";
-const LAST_TRANSCRIPT_KEY = "last";
-const PROGRESS_KEY = "subdiver.readerProgress";
+const CHAT_STORE = "episodeChats";
+
+const LEGACY_LAST_KEY = "last";
+const PROGRESS_MAP_KEY = "subdiver.progressMap";
+const LAST_KEY_KEY = "subdiver.lastTranscriptKey";
+const LEGACY_PROGRESS_KEY = "subdiver.readerProgress";
 
 let dbPromise: Promise<IDBDatabase> | undefined;
 
@@ -17,6 +27,7 @@ function openDb() {
         const db = request.result;
         if (!db.objectStoreNames.contains(TRANSCRIPT_STORE)) db.createObjectStore(TRANSCRIPT_STORE);
         if (!db.objectStoreNames.contains(CACHE_STORE)) db.createObjectStore(CACHE_STORE);
+        if (!db.objectStoreNames.contains(CHAT_STORE)) db.createObjectStore(CHAT_STORE);
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
@@ -31,23 +42,101 @@ async function getStore(storeName: string, mode: IDBTransactionMode) {
   return db.transaction(storeName, mode).objectStore(storeName);
 }
 
+/* ------------------------------------------------------------------ *
+ * Transcripts (now multi)                                            *
+ * ------------------------------------------------------------------ */
+
+export function makeTranscriptKey(doc: TranscriptDocument) {
+  if (doc.source?.type === "sample") return `sample:${doc.source.sampleSlug}`;
+  return `upload:${doc.fileName}:${doc.rawText.length}:${doc.cues[0]?.startMs ?? 0}:${doc.cues.length}`;
+}
+
 export async function saveTranscript(doc: TranscriptDocument) {
+  const key = makeTranscriptKey(doc);
   const store = await getStore(TRANSCRIPT_STORE, "readwrite");
-  return requestToPromise(store.put(doc, LAST_TRANSCRIPT_KEY));
+  await requestToPromise(store.put(doc, key));
+  // Legacy alias for backwards compatibility (also rewrite under "last").
+  await requestToPromise(store.put(doc, LEGACY_LAST_KEY));
+  localStorage.setItem(LAST_KEY_KEY, key);
 }
 
-export async function loadTranscript(): Promise<TranscriptDocument | undefined> {
+export async function loadTranscriptByKey(key: string): Promise<TranscriptDocument | undefined> {
   const store = await getStore(TRANSCRIPT_STORE, "readonly");
-  return requestToPromise<TranscriptDocument | undefined>(store.get(LAST_TRANSCRIPT_KEY));
+  return requestToPromise<TranscriptDocument | undefined>(store.get(key));
 }
 
-export async function clearTranscript() {
+export async function loadLastTranscript(): Promise<TranscriptDocument | undefined> {
+  const key = localStorage.getItem(LAST_KEY_KEY);
+  if (key) {
+    const found = await loadTranscriptByKey(key);
+    if (found) return found;
+  }
+  const store = await getStore(TRANSCRIPT_STORE, "readonly");
+  return requestToPromise<TranscriptDocument | undefined>(store.get(LEGACY_LAST_KEY));
+}
+
+export async function listSavedTranscriptKeys(): Promise<string[]> {
+  const store = await getStore(TRANSCRIPT_STORE, "readonly");
+  return new Promise<string[]>((resolve, reject) => {
+    const request = store.getAllKeys();
+    request.onsuccess = () =>
+      resolve(
+        (request.result as IDBValidKey[])
+          .filter((key): key is string => typeof key === "string")
+          .filter((key) => key !== LEGACY_LAST_KEY),
+      );
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function deleteTranscriptByKey(key: string) {
   const store = await getStore(TRANSCRIPT_STORE, "readwrite");
-  return requestToPromise(store.delete(LAST_TRANSCRIPT_KEY));
+  await requestToPromise(store.delete(key));
 }
 
-export function makeLookupCacheKey(model: string, targetLanguage: string, targetText: string) {
-  return `${model.trim()}|${targetLanguage.trim().toLowerCase()}|${normalizeTarget(targetText)}|v1`;
+export async function clearAllTranscripts() {
+  const store = await getStore(TRANSCRIPT_STORE, "readwrite");
+  await requestToPromise(store.clear());
+  localStorage.removeItem(LAST_KEY_KEY);
+}
+
+export function setLastTranscriptKey(key: string | undefined) {
+  if (!key) localStorage.removeItem(LAST_KEY_KEY);
+  else localStorage.setItem(LAST_KEY_KEY, key);
+}
+
+export function getLastTranscriptKey() {
+  return localStorage.getItem(LAST_KEY_KEY) ?? undefined;
+}
+
+/* ------------------------------------------------------------------ *
+ * Lookup cache (per word/sentence)                                   *
+ * ------------------------------------------------------------------ */
+
+export function makeLookupCacheKey(
+  model: string,
+  targetLanguage: string,
+  targetText: string,
+  customPrompt = "",
+) {
+  return [
+    model.trim(),
+    targetLanguage.trim().toLowerCase(),
+    normalizeTarget(targetText),
+    customPrompt.trim() ? `cp:${shortHash(customPrompt.trim())}` : "",
+    // Bumped when the system prompt template changes so stale answers expire.
+    "v2",
+  ]
+    .filter(Boolean)
+    .join("|");
+}
+
+function shortHash(value: string) {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) | 0;
+  }
+  return (hash >>> 0).toString(36);
 }
 
 export async function loadLookup(cacheKey: string): Promise<LookupResult | undefined> {
@@ -70,28 +159,101 @@ export async function clearLookupCache() {
   return requestToPromise(store.clear());
 }
 
-export function makeTranscriptKey(doc: TranscriptDocument) {
-  if (doc.source?.type === "sample") return `sample:${doc.source.sampleSlug}`;
-  return `upload:${doc.fileName}:${doc.rawText.length}:${doc.cues[0]?.startMs ?? 0}:${doc.cues.length}`;
+/* ------------------------------------------------------------------ *
+ * Episode chat — persistent per transcript                           *
+ * ------------------------------------------------------------------ */
+
+export async function loadEpisodeChat(transcriptKey: string): Promise<EpisodeChat | undefined> {
+  const store = await getStore(CHAT_STORE, "readonly");
+  return requestToPromise<EpisodeChat | undefined>(store.get(transcriptKey));
 }
 
-export function loadReaderProgress(): ReaderProgress | undefined {
+export async function saveEpisodeChat(chat: EpisodeChat) {
+  const store = await getStore(CHAT_STORE, "readwrite");
+  return requestToPromise(store.put(chat, chat.transcriptKey));
+}
+
+export async function appendEpisodeChat(transcriptKey: string, messages: EpisodeChatMessage[]) {
+  const existing = (await loadEpisodeChat(transcriptKey))?.messages ?? [];
+  const next: EpisodeChat = {
+    transcriptKey,
+    messages: [...existing, ...messages],
+    updatedAt: Date.now(),
+  };
+  await saveEpisodeChat(next);
+  return next;
+}
+
+export async function clearEpisodeChat(transcriptKey: string) {
+  const store = await getStore(CHAT_STORE, "readwrite");
+  return requestToPromise(store.delete(transcriptKey));
+}
+
+/* ------------------------------------------------------------------ *
+ * Reader progress — per transcript, stored in localStorage           *
+ * ------------------------------------------------------------------ */
+
+type ProgressMap = Record<string, ReaderProgress>;
+
+function readProgressMap(): ProgressMap {
+  // Migrate legacy single-key progress on first read.
   try {
-    const raw = localStorage.getItem(PROGRESS_KEY);
-    if (!raw) return undefined;
-    return JSON.parse(raw) as ReaderProgress;
+    const raw = localStorage.getItem(PROGRESS_MAP_KEY);
+    if (raw) return JSON.parse(raw) as ProgressMap;
   } catch {
-    return undefined;
+    /* fall through */
   }
+  const legacy = localStorage.getItem(LEGACY_PROGRESS_KEY);
+  if (legacy) {
+    try {
+      const parsed = JSON.parse(legacy) as ReaderProgress;
+      if (parsed?.transcriptKey) {
+        const map: ProgressMap = { [parsed.transcriptKey]: parsed };
+        localStorage.setItem(PROGRESS_MAP_KEY, JSON.stringify(map));
+        return map;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return {};
+}
+
+function writeProgressMap(map: ProgressMap) {
+  localStorage.setItem(PROGRESS_MAP_KEY, JSON.stringify(map));
+}
+
+export function loadAllProgress(): ProgressMap {
+  return readProgressMap();
+}
+
+export function loadReaderProgress(transcriptKey?: string): ReaderProgress | undefined {
+  const map = readProgressMap();
+  if (transcriptKey) return map[transcriptKey];
+  // Fallback: most recently updated entry.
+  const entries = Object.values(map).sort((a, b) => b.updatedAt - a.updatedAt);
+  return entries[0];
 }
 
 export function saveReaderProgress(progress: ReaderProgress) {
-  localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+  const map = readProgressMap();
+  map[progress.transcriptKey] = progress;
+  writeProgressMap(map);
 }
 
-export function clearReaderProgress() {
-  localStorage.removeItem(PROGRESS_KEY);
+export function clearReaderProgress(transcriptKey?: string) {
+  if (!transcriptKey) {
+    localStorage.removeItem(PROGRESS_MAP_KEY);
+    return;
+  }
+  const map = readProgressMap();
+  delete map[transcriptKey];
+  writeProgressMap(map);
 }
+
+/* ------------------------------------------------------------------ *
+ * Helpers                                                            *
+ * ------------------------------------------------------------------ */
 
 function normalizeTarget(targetText: string) {
   return targetText.trim().replace(/\s+/g, " ").toLowerCase();
@@ -103,3 +265,11 @@ function requestToPromise<T = void>(request: IDBRequest<T>) {
     request.onerror = () => reject(request.error);
   });
 }
+
+/* ------------------------------------------------------------------ *
+ * Back-compat re-exports for existing call sites that still import   *
+ * the old names. To be removed once App.tsx fully replaces main.tsx. *
+ * ------------------------------------------------------------------ */
+
+export const loadTranscript = loadLastTranscript;
+export const clearTranscript = clearAllTranscripts;
