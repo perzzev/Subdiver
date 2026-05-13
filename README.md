@@ -36,7 +36,7 @@ http://127.0.0.1:5173/
 ## Use The App
 
 1. Open Settings with the gear button.
-2. Enter your OpenAI API key.
+2. Enter your OpenAI API key. If you have not created one before, this walkthrough is a useful reference: https://www.youtube.com/watch?v=SzPE_AE0eEo
 3. Click "Load models" to fetch text-capable models available to your account, then choose one or type a model manually.
 4. Set the target language, for example `Russian` or `English`.
 5. Start from a bundled sample episode or upload your own subtitle file.

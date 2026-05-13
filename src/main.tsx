@@ -25,6 +25,7 @@ import {
 import {
   BookOpen,
   CheckCircle2,
+  ExternalLink,
   FileText,
   FolderOpen,
   GraduationCap,
@@ -848,6 +849,23 @@ function SettingsDialog({
             onChange={(event) => onChange({ ...settings, apiKey: event.target.value })}
           />
         </label>
+        <Callout.Root color="teal" variant="surface" className="api-key-tip">
+          <Callout.Icon>
+            <Info size={16} />
+          </Callout.Icon>
+          <Callout.Text>
+            Create an API key in your OpenAI dashboard, paste it here, then load your available models.{" "}
+            <a
+              href="https://www.youtube.com/watch?v=SzPE_AE0eEo"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-help-link"
+            >
+              Watch a quick walkthrough
+              <ExternalLink size={13} aria-hidden="true" />
+            </a>
+          </Callout.Text>
+        </Callout.Root>
         <label className="field-label">
           Target language
           <TextField.Root

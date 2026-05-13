@@ -302,6 +302,24 @@ textarea {
   overflow: auto;
 }
 
+.api-key-tip {
+  line-height: 1.45;
+}
+
+.inline-help-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #087764;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.inline-help-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .translation-text {
   margin: 4px 0 0;
 }
