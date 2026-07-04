@@ -1,6 +1,6 @@
 import type {
+  ChatConversation,
   EpisodeChat,
-  EpisodeChatMessage,
   LookupResult,
   ReaderProgress,
   TranscriptDocument,
@@ -165,23 +165,48 @@ export async function clearLookupCache() {
 
 export async function loadEpisodeChat(transcriptKey: string): Promise<EpisodeChat | undefined> {
   const store = await getStore(CHAT_STORE, "readonly");
-  return requestToPromise<EpisodeChat | undefined>(store.get(transcriptKey));
+  const chat = await requestToPromise<EpisodeChat | undefined>(store.get(transcriptKey));
+  if (!chat) return undefined;
+  return migrateEpisodeChat(chat);
+}
+
+/**
+ * Old chats stored a single flat `messages` array. Wrap those into one
+ * conversation so history keeps working after the upgrade. Also drops any
+ * empty conversations that shouldn't have been persisted.
+ */
+function migrateEpisodeChat(chat: EpisodeChat): EpisodeChat {
+  if (Array.isArray(chat.conversations)) {
+    return { ...chat, conversations: chat.conversations.filter((c) => c.messages.length > 0) };
+  }
+
+  const legacy = chat.messages ?? [];
+  if (legacy.length === 0) {
+    return { transcriptKey: chat.transcriptKey, conversations: [], updatedAt: chat.updatedAt };
+  }
+
+  const firstUser = legacy.find((m) => m.role === "user");
+  const conversation: ChatConversation = {
+    id: `${chat.updatedAt}-legacy`,
+    createdAt: legacy[0].createdAt,
+    updatedAt: legacy[legacy.length - 1].createdAt,
+    contextSelection: firstUser?.contextSelection,
+    contextCueId: firstUser?.contextCueId,
+    contextCueText: firstUser?.contextCueText,
+    messages: legacy,
+  };
+  return { transcriptKey: chat.transcriptKey, conversations: [conversation], updatedAt: chat.updatedAt };
 }
 
 export async function saveEpisodeChat(chat: EpisodeChat) {
   const store = await getStore(CHAT_STORE, "readwrite");
-  return requestToPromise(store.put(chat, chat.transcriptKey));
-}
-
-export async function appendEpisodeChat(transcriptKey: string, messages: EpisodeChatMessage[]) {
-  const existing = (await loadEpisodeChat(transcriptKey))?.messages ?? [];
-  const next: EpisodeChat = {
-    transcriptKey,
-    messages: [...existing, ...messages],
-    updatedAt: Date.now(),
+  // Never persist the legacy flat list once we've moved to conversations.
+  const clean: EpisodeChat = {
+    transcriptKey: chat.transcriptKey,
+    conversations: chat.conversations,
+    updatedAt: chat.updatedAt,
   };
-  await saveEpisodeChat(next);
-  return next;
+  return requestToPromise(store.put(clean, chat.transcriptKey));
 }
 
 export async function clearEpisodeChat(transcriptKey: string) {

@@ -67,10 +67,35 @@ export type EpisodeChatMessage = {
   contextCueText?: string;
 };
 
+/**
+ * A single question thread. Each time the learner hits "Ask follow-up" from a
+ * lookup we start a fresh conversation seeded with that word/phrase as its
+ * subject, so questions about different words stay separate and reviewable.
+ */
+export type ChatConversation = {
+  id: string;
+  createdAt: number;
+  updatedAt: number;
+  /** The word/phrase this thread is about (the lookup subject). */
+  contextSelection?: string;
+  /** Cue id the subject belonged to — lets us scroll back to it. */
+  contextCueId?: string;
+  /** Cue text snapshot, shown as context and sent to the model. */
+  contextCueText?: string;
+  /** How the subject was picked (word / selection / sentence). */
+  contextMode?: LookupMode;
+  messages: EpisodeChatMessage[];
+};
+
 export type EpisodeChat = {
   transcriptKey: string;
-  messages: EpisodeChatMessage[];
+  conversations: ChatConversation[];
   updatedAt: number;
+  /**
+   * Legacy flat message list from before conversations existed. Kept optional
+   * so old stored chats still load and can be migrated on read.
+   */
+  messages?: EpisodeChatMessage[];
 };
 
 export type TranscriptSource =
