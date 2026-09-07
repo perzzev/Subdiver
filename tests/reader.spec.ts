@@ -51,6 +51,19 @@ test("EPUB words, sentences, selections, chat, pagination and progress survive r
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page.locator(".message.assistant")).toContainText("separable verb");
   await page.getByRole("button", { name: "Close chat panel" }).click();
+  await page.getByRole("button", { name: "Close translation" }).click();
+  await page.locator(".word-token").filter({ hasText: /^mij$/ }).first().click();
+  await expect(page.getByRole("dialog", { name: "Translation" })).toContainText("He calls me.");
+  await page.getByRole("button", { name: "Ask follow-up" }).click();
+  await expect(page.getByRole("tab")).toHaveCount(2);
+  await expect(page.locator(".message")).toHaveCount(0);
+  await page.getByRole("textbox").fill("What is mij?");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.locator(".message.assistant")).toContainText("separable verb");
+  expect(prompts.at(-1)).not.toContain("Why op?");
+  await page.getByRole("tab", { name: /^Hij belt/ }).click();
+  await expect(page.locator(".message.user")).toHaveText("Why op?");
+  await page.getByRole("button", { name: "Close chat panel" }).click();
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.locator(".chapter-navigation")).toContainText("Section 2 of 3");
   await expect(page.locator(".cue-row").first()).toContainText("alinea 40");
@@ -63,8 +76,9 @@ test("EPUB words, sentences, selections, chat, pagination and progress survive r
   await expect(page.locator(".chapter-navigation")).toContainText("Section 2 of 3");
   await page.getByRole("button", { name: "Book chat" }).click();
   await expect(page.locator(".message.assistant")).toContainText("separable verb");
+  await expect(page.getByRole("tab")).toHaveCount(2);
   // A saved chat reference can reopen a passage on another section.
-  await page.getByRole("button", { name: /^About: Hij belt/ }).click();
+  await page.getByTitle("Jump back to that passage").click();
   await expect(page.locator(".chapter-navigation")).toContainText("Section 1 of 3");
   await page.getByRole("button", { name: "Close chat panel" }).click();
   await page.getByLabel("Chapter", { exact: true }).selectOption("1");

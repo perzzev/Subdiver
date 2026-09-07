@@ -6,14 +6,13 @@ import "./themes/warm.css";
 
 import { Badge, Box, Button, Callout, Flex, Heading, IconButton, Popover, Text, Theme } from "@radix-ui/themes";
 import { FileText, HelpCircle, Info } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { logDebug } from "./debug";
 import { requestFollowUp, requestLookup } from "./openai";
 import { getSampleUrl, sampleEpisodes, type SampleEpisode } from "./samples";
 import { loadSettings, saveSettings } from "./settings";
 import { formatTimestamp, parseSubtitleFile } from "./subtitles";
 import {
-  appendEpisodeChat,
   clearEpisodeChat,
   clearLookupCache,
   deleteLookup,
@@ -27,6 +26,7 @@ import {
   loadTranscriptByKey,
   makeLookupCacheKey,
   makeTranscriptKey,
+  saveEpisodeChat,
   saveLookup,
   saveReaderProgress,
   saveTranscript,
@@ -35,6 +35,7 @@ import {
 import { getTheme, loadTheme, saveTheme } from "./theme";
 import type {
   AppSettings,
+  ChatConversation,
   EpisodeChatMessage,
   LookupRequest,
   LookupResult,
@@ -62,7 +63,8 @@ export default function App() {
   const [lookup, setLookup] = useState<LookupState | undefined>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
-  const [chatMessages, setChatMessages] = useState<EpisodeChatMessage[]>([]);
+  const [conversations, setConversations] = useState<ChatConversation[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | undefined>();
   const [chatLoading, setChatLoading] = useState(false);
   const [appError, setAppError] = useState("");
   const [progressMap, setProgressMap] = useState<Record<string, ReaderProgress>>(() => loadAllProgress());
@@ -131,15 +133,25 @@ export default function App() {
     };
   }, [debug]);
 
+  // Mirror conversations into a ref so async completions read the latest list
+  // without stale-closure clobbering (e.g. if a new thread starts mid-request).
+  const conversationsRef = useRef<ChatConversation[]>([]);
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+
   // Load chat history whenever the transcript changes.
   useEffect(() => {
     if (!transcript) {
-      setChatMessages([]);
+      setConversations([]);
+      setActiveConversationId(undefined);
       return;
     }
     const key = makeTranscriptKey(transcript);
     void loadEpisodeChat(key).then((chat) => {
-      setChatMessages(chat?.messages ?? []);
+      const convos = chat?.conversations ?? [];
+      setConversations(convos);
+      setActiveConversationId(convos[0]?.id);
     });
   }, [transcript]);
 
@@ -339,9 +351,55 @@ export default function App() {
     [settings.customPrompt, startLookup],
   );
 
+  const persistConversations = useCallback(
+    (convos: ChatConversation[]) => {
+      if (!transcript) return;
+      void saveEpisodeChat({
+        transcriptKey: makeTranscriptKey(transcript),
+        conversations: convos.filter((c) => c.messages.length > 0),
+        updatedAt: Date.now(),
+      });
+    },
+    [transcript],
+  );
+
+  // "Ask follow-up" always opens a fresh thread on top, seeded with the word
+  // that's currently looked up. Empty threads (opened but never asked) are
+  // pruned so repeated clicks don't stack blank dialogs.
   const handleAskFollowUp = useCallback(() => {
     setChatOpen(true);
+    const now = Date.now();
+    const conversation: ChatConversation = {
+      id: `${now}-c`,
+      createdAt: now,
+      updatedAt: now,
+      contextSelection: lookup?.request.targetText,
+      contextCueId: lookup?.request.cueId,
+      contextCueText: lookup?.request.cueText,
+      contextMode: lookup?.request.mode,
+      messages: [],
+    };
+    setConversations((prev) => [conversation, ...prev.filter((c) => c.messages.length > 0)]);
+    setActiveConversationId(conversation.id);
+  }, [lookup]);
+
+  const handleSelectConversation = useCallback((id: string) => {
+    setActiveConversationId(id);
+    // Drop any other empty (unasked) threads when leaving one.
+    setConversations((prev) => prev.filter((c) => c.messages.length > 0 || c.id === id));
   }, []);
+
+  const handleDeleteConversation = useCallback(
+    (id: string) => {
+      setConversations((prev) => {
+        const next = prev.filter((c) => c.id !== id);
+        persistConversations(next);
+        if (id === activeConversationId) setActiveConversationId(next[0]?.id);
+        return next;
+      });
+    },
+    [activeConversationId, persistConversations],
+  );
 
   const handleChatSubmit = useCallback(
     async (question: string) => {
@@ -349,25 +407,37 @@ export default function App() {
       const trimmed = question.trim();
       if (!trimmed) return;
 
-      const transcriptKey = makeTranscriptKey(transcript);
       const now = Date.now();
 
-      // Build a context request: prefer current lookup, otherwise the most recent assistant context.
-      const lastWith = <K extends keyof EpisodeChatMessage>(key: K): EpisodeChatMessage | undefined => {
-        for (let i = chatMessages.length - 1; i >= 0; i -= 1) {
-          if (chatMessages[i][key]) return chatMessages[i];
-        }
-        return undefined;
-      };
-      const baseRequest: LookupRequest = lookup?.request ?? {
-        targetText: lastWith("contextSelection")?.contextSelection ?? "",
-        cueText: lastWith("contextCueText")?.contextCueText ?? "",
-        cueId: lastWith("contextCueId")?.contextCueId ?? "",
+      // Find the active thread, or open one from the current lookup on the fly.
+      let convos = conversationsRef.current;
+      let convoId = activeConversationId;
+      if (!convoId || !convos.some((c) => c.id === convoId)) {
+        const created: ChatConversation = {
+          id: `${now}-c`,
+          createdAt: now,
+          updatedAt: now,
+          contextSelection: lookup?.request.targetText,
+          contextCueId: lookup?.request.cueId,
+          contextCueText: lookup?.request.cueText,
+          contextMode: lookup?.request.mode,
+          messages: [],
+        };
+        convos = [created, ...convos.filter((c) => c.messages.length > 0)];
+        convoId = created.id;
+        setActiveConversationId(convoId);
+      }
+
+      const activeConvo = convos.find((c) => c.id === convoId)!;
+      const baseRequest: LookupRequest = {
+        targetText: activeConvo.contextSelection ?? "",
+        cueText: activeConvo.contextCueText ?? "",
+        cueId: activeConvo.contextCueId ?? "",
         cueStartMs: 0,
         cueEndMs: 0,
         targetLanguage: settings.targetLanguage,
         model: settings.model,
-        mode: "selection",
+        mode: activeConvo.contextMode ?? "selection",
       };
 
       const userMessage: EpisodeChatMessage = {
@@ -375,18 +445,16 @@ export default function App() {
         role: "user",
         content: trimmed,
         createdAt: now,
-        contextSelection: lookup?.request.targetText,
-        contextCueId: lookup?.request.cueId,
-        contextCueText: lookup?.request.cueText,
       };
 
+      const afterUser = appendToConversation(convos, convoId, userMessage);
+      setConversations(afterUser);
+      persistConversations(afterUser);
       setChatLoading(true);
-      const optimistic = [...chatMessages, userMessage];
-      setChatMessages(optimistic);
-      await appendEpisodeChat(transcriptKey, [userMessage]);
 
+      const priorMessages = [...activeConvo.messages, userMessage];
       try {
-        const answer = await requestFollowUp(settings.apiKey, baseRequest, optimistic, trimmed, {
+        const answer = await requestFollowUp(settings.apiKey, baseRequest, priorMessages, trimmed, {
           customPrompt: settings.customPrompt,
         });
         const assistantMessage: EpisodeChatMessage = {
@@ -395,8 +463,9 @@ export default function App() {
           content: answer || "(empty response)",
           createdAt: Date.now(),
         };
-        setChatMessages((prev) => [...prev, assistantMessage]);
-        await appendEpisodeChat(transcriptKey, [assistantMessage]);
+        const next = appendToConversation(conversationsRef.current, convoId, assistantMessage);
+        setConversations(next);
+        persistConversations(next);
       } catch (error) {
         const errorMessage: EpisodeChatMessage = {
           id: `${Date.now()}-e`,
@@ -404,15 +473,17 @@ export default function App() {
           content: error instanceof Error ? error.message : "Follow-up request failed.",
           createdAt: Date.now(),
         };
-        setChatMessages((prev) => [...prev, errorMessage]);
-        await appendEpisodeChat(transcriptKey, [errorMessage]);
+        const next = appendToConversation(conversationsRef.current, convoId, errorMessage);
+        setConversations(next);
+        persistConversations(next);
       } finally {
         setChatLoading(false);
       }
     },
     [
-      chatMessages,
+      activeConversationId,
       lookup,
+      persistConversations,
       settings.apiKey,
       settings.customPrompt,
       settings.model,
@@ -425,7 +496,8 @@ export default function App() {
     if (!transcript) return;
     if (!window.confirm(`Clear all chat history for this ${transcript.kind === "epub" ? "book" : "episode"}?`)) return;
     await clearEpisodeChat(makeTranscriptKey(transcript));
-    setChatMessages([]);
+    setConversations([]);
+    setActiveConversationId(undefined);
   }, [transcript]);
 
   const handleJumpToCue = useCallback((cueId: string) => {
@@ -513,8 +585,9 @@ export default function App() {
                     <strong>Select a phrase</strong> with the mouse to translate just that fragment.
                   </Text>
                   <Text size="2" color="gray" as="p">
-                    <strong>Reading chat</strong> stores every follow-up you ask, per book or episode — come
-                    back later to review the words and constructions that puzzled you.
+                    <strong>Reading chat</strong> gives every word you ask about its own thread —
+                    the newest opens on top, and you can switch between them to review the words and
+                    constructions that puzzled you.
                   </Text>
                   <Text size="2" color="gray" as="p">
                     Press <kbd>Esc</kbd> to close a translation card.
@@ -553,7 +626,7 @@ export default function App() {
                 settings={settings}
                 lookup={lookup}
                 resumeCueId={pendingScrollCueId}
-                chatBadge={chatMessages.length}
+                chatBadge={conversations.reduce((total, c) => total + c.messages.length, 0)}
                 onResumeComplete={() => setPendingScrollCueId(undefined)}
                 onVisibleCueChange={handleVisibleCueChange}
                 onLookup={(req) => void startLookup(req)}
@@ -585,10 +658,12 @@ export default function App() {
             <EpisodeChatPanel
               contentLabel={transcript.kind === "epub" ? "book" : "episode"}
               open={chatOpen}
-              messages={chatMessages}
+              conversations={conversations}
+              activeConversationId={activeConversationId}
               loading={chatLoading}
-              pendingContext={lookup}
               onSubmit={handleChatSubmit}
+              onSelectConversation={handleSelectConversation}
+              onDeleteConversation={handleDeleteConversation}
               onClose={() => setChatOpen(false)}
               onClear={() => void handleClearChat()}
               onJumpToCue={handleJumpToCue}
@@ -606,6 +681,22 @@ export default function App() {
         </footer>
       </div>
     </Theme>
+  );
+}
+
+function appendToConversation(
+  conversations: ChatConversation[],
+  id: string,
+  message: EpisodeChatMessage,
+): ChatConversation[] {
+  return conversations.map((conversation) =>
+    conversation.id === id
+      ? {
+          ...conversation,
+          messages: [...conversation.messages, message],
+          updatedAt: message.createdAt,
+        }
+      : conversation,
   );
 }
 
