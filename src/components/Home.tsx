@@ -1,7 +1,8 @@
 import { Badge, Box, Button, Flex, Heading, Spinner, Text } from "@radix-ui/themes";
-import { CheckCircle2, Play, Upload } from "lucide-react";
+import { BookOpen, CheckCircle2, FileText, Play, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { type SampleEpisode, sampleEpisodes } from "../samples";
+import type { SavedUpload } from "../storage";
 import type { ReaderProgress } from "../types";
 
 type SampleStats = {
@@ -17,6 +18,9 @@ type ContinueInfo = {
 };
 
 export function Home({
+  savedUploads,
+  uploading,
+  onOpenUpload,
   hasApiKey,
   loadingSampleSlug,
   sampleStats,
@@ -26,6 +30,9 @@ export function Home({
   onSample,
   onUploadFile,
 }: {
+  savedUploads: SavedUpload[];
+  uploading: boolean;
+  onOpenUpload: (key: string) => void;
   hasApiKey: boolean;
   loadingSampleSlug: string;
   sampleStats: Record<string, SampleStats>;
@@ -41,7 +48,7 @@ export function Home({
 
   function handleFiles(files: FileList | null) {
     const file = files?.[0];
-    if (file) onUploadFile(file);
+    if (file && !uploading && !loadingSampleSlug) onUploadFile(file);
   }
 
   return (
@@ -60,11 +67,76 @@ export function Home({
                 {continueInfo.subtitle}
               </Text>
             </Box>
-            <Button size="3" onClick={continueInfo.onResume}>
+            <Button size="3" disabled={uploading || Boolean(loadingSampleSlug)} onClick={continueInfo.onResume}>
               <Play size={16} />
               Continue
             </Button>
           </Flex>
+        </section>
+      ) : null}
+
+      <section
+        className={`dropzone ${dragging ? "dragging" : ""}`}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDragging(false);
+          handleFiles(event.dataTransfer.files);
+        }}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          aria-label="Upload a book or subtitles"
+          disabled={uploading || Boolean(loadingSampleSlug)}
+          accept=".epub,application/epub+zip,.vtt,.srt,text/vtt,application/x-subrip,text/plain"
+          className="hidden-input"
+          onChange={(event) => {
+            handleFiles(event.currentTarget.files);
+            event.currentTarget.value = "";
+          }}
+        />
+        <Flex direction="column" align="center" gap="2">
+          {uploading ? <Spinner /> : <Upload size={22} />}
+          <Text size="3" weight="bold">
+            {uploading ? "Opening your file…" : "Read a book or your own subtitles"}
+          </Text>
+          <Text size="2" color="gray" align="center">
+            Drop an .epub, .vtt or .srt file here. Click any word as you read to understand it in context.
+          </Text>
+          <Text size="1" color="gray">Files are saved in this browser. EPUB books must be DRM-free.</Text>
+          <Button disabled={uploading || Boolean(loadingSampleSlug)} variant="soft" onClick={() => fileInputRef.current?.click()}>
+            Choose file
+          </Button>
+        </Flex>
+      </section>
+
+      {savedUploads.length > 0 ? (
+        <section className="home-band" aria-label="Your library">
+          <Heading as="h2" size="5" mb="3">Your library</Heading>
+          <div className="sample-grid">
+            {savedUploads.map((upload) => {
+              const progress = sampleProgress[upload.key];
+              const ratio = progress?.totalCues ? Math.min(1, ((progress.cueIndex ?? 0) + 1) / progress.totalCues) : 0;
+              return (
+                <article className="sample-card" key={upload.key}>
+                  <header className="sample-card-head">
+                    <Badge color="gray" variant="soft">{upload.kind === "epub" ? <BookOpen size={13} /> : <FileText size={13} />}{upload.kind === "epub" ? "EPUB book" : "Subtitles"}</Badge>
+                    {progress ? <Badge color="green" variant="surface">{Math.round(ratio * 100)}%</Badge> : null}
+                  </header>
+                  <Heading as="h3" size="4">{upload.displayTitle ?? upload.fileName}</Heading>
+                  {upload.author ? <Text size="2" color="gray">{upload.author}</Text> : null}
+                  <Button variant="surface" disabled={uploading || Boolean(loadingSampleSlug)} onClick={() => onOpenUpload(upload.key)}>
+                    <BookOpen size={15} />{progress ? "Resume" : "Read"}
+                  </Button>
+                </article>
+              );
+            })}
+          </div>
         </section>
       ) : null}
 
@@ -118,7 +190,7 @@ export function Home({
                   {stats ? `${stats.cues} cues · ${stats.duration}` : "Subtitle sample"}
                 </Text>
                 {progress ? <div className="sample-progress" style={{ ["--p" as string]: progressRatio }} /> : null}
-                <Button variant="surface" onClick={() => onSample(sample)} disabled={Boolean(loadingSampleSlug)}>
+                <Button variant="surface" onClick={() => onSample(sample)} disabled={uploading || Boolean(loadingSampleSlug)}>
                   {loading ? <Spinner /> : <Play size={15} />}
                   {progress ? "Resume" : "Start"}
                 </Button>
@@ -128,42 +200,7 @@ export function Home({
         </div>
       </section>
 
-      <section
-        className={`dropzone ${dragging ? "dragging" : ""}`}
-        onDragOver={(event) => {
-          event.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(event) => {
-          event.preventDefault();
-          setDragging(false);
-          handleFiles(event.dataTransfer.files);
-        }}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".vtt,.srt,text/vtt,application/x-subrip,text/plain"
-          className="hidden-input"
-          onChange={(event) => {
-            handleFiles(event.currentTarget.files);
-            event.currentTarget.value = "";
-          }}
-        />
-        <Flex direction="column" align="center" gap="2">
-          <Upload size={22} />
-          <Text size="3" weight="bold">
-            Upload your own subtitles
-          </Text>
-          <Text size="2" color="gray" align="center">
-            Drag a .vtt or .srt file here, or click below. Everything stays in this browser.
-          </Text>
-          <Button variant="soft" onClick={() => fileInputRef.current?.click()}>
-            Choose file
-          </Button>
-        </Flex>
-      </section>
+
 
     </div>
   );

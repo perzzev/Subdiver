@@ -48,7 +48,34 @@ async function getStore(storeName: string, mode: IDBTransactionMode) {
 
 export function makeTranscriptKey(doc: TranscriptDocument) {
   if (doc.source?.type === "sample") return `sample:${doc.source.sampleSlug}`;
+  if (doc.kind === "epub" && doc.contentHash) return `epub:${doc.contentHash}`;
   return `upload:${doc.fileName}:${doc.rawText.length}:${doc.cues[0]?.startMs ?? 0}:${doc.cues.length}`;
+}
+
+export type SavedUpload = Pick<TranscriptDocument, "displayTitle" | "fileName" | "kind" | "author"> & {
+  key: string;
+};
+
+export async function listSavedUploads(): Promise<SavedUpload[]> {
+  const store = await getStore(TRANSCRIPT_STORE, "readonly");
+  return new Promise((resolve, reject) => {
+    const uploads: Array<SavedUpload & { loadedAt: number }> = [];
+    const request = store.openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        resolve(uploads.sort((a, b) => b.loadedAt - a.loadedAt));
+        return;
+      }
+      const doc = cursor.value as TranscriptDocument;
+      if (cursor.key !== LEGACY_LAST_KEY && doc.source?.type !== "sample") {
+        uploads.push({ key: String(cursor.key), displayTitle: doc.displayTitle, fileName: doc.fileName,
+          kind: doc.kind, author: doc.author, loadedAt: doc.loadedAt });
+      }
+      cursor.continue();
+    };
+    request.onerror = () => reject(request.error);
+  });
 }
 
 export async function saveTranscript(doc: TranscriptDocument) {
@@ -118,14 +145,18 @@ export function makeLookupCacheKey(
   targetLanguage: string,
   targetText: string,
   customPrompt = "",
+  cueText = "",
+  mode = "word",
 ) {
   return [
     model.trim(),
     targetLanguage.trim().toLowerCase(),
     normalizeTarget(targetText),
+    normalizeTarget(cueText),
+    mode,
     customPrompt.trim() ? `cp:${shortHash(customPrompt.trim())}` : "",
     // Bumped when the system prompt template changes so stale answers expire.
-    "v2",
+    "v3",
   ]
     .filter(Boolean)
     .join("|");

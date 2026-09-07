@@ -5,6 +5,9 @@ export type SubtitleCue = {
   endMs: number;
   text: string;
   rawText: string;
+  /** EPUB blocks share the lookup flow, without subtitle timestamps. */
+  chapterId?: string;
+  headingLevel?: number;
 };
 
 export type AppSettings = {
@@ -83,6 +86,10 @@ export type TranscriptSource =
     };
 
 export type TranscriptDocument = {
+  kind?: "subtitles" | "epub";
+  contentHash?: string;
+  author?: string;
+  chapters?: BookChapter[];
   fileName: string;
   loadedAt: number;
   cues: SubtitleCue[];
@@ -90,6 +97,13 @@ export type TranscriptDocument = {
   source?: TranscriptSource;
   /** Friendly title for the catalog. */
   displayTitle?: string;
+};
+
+export type BookChapter = {
+  id: string;
+  title: string;
+  startIndex: number;
+  endIndex: number;
 };
 
 export type ReaderProgress = {

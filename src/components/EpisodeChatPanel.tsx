@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { EpisodeChatMessage, LookupState } from "../types";
 
 type Props = {
+  contentLabel?: "book" | "episode";
   open: boolean;
   messages: EpisodeChatMessage[];
   loading: boolean;
@@ -15,6 +16,7 @@ type Props = {
 };
 
 export function EpisodeChatPanel({
+  contentLabel = "episode",
   open,
   messages,
   loading,
@@ -49,18 +51,18 @@ export function EpisodeChatPanel({
   }
 
   return (
-    <aside className={`side-panel ${open ? "open" : ""}`} aria-hidden={!open}>
+    <aside className={`side-panel ${open ? "open" : ""}`} aria-hidden={!open} inert={!open}>
       <Flex align="center" justify="between" p="4">
         <Heading as="h2" size="4">
-          Episode chat
+          {contentLabel === "book" ? "Book chat" : "Episode chat"}
         </Heading>
         <Flex gap="2">
           <IconButton
             variant="ghost"
             color="gray"
             onClick={onClear}
-            aria-label="Clear this episode chat"
-            title="Clear this episode chat"
+            aria-label={`Clear this ${contentLabel} chat`}
+            title={`Clear this ${contentLabel} chat`}
             disabled={messages.length === 0}
           >
             <Trash2 size={16} />
@@ -94,7 +96,7 @@ export function EpisodeChatPanel({
           {messages.length === 0 ? (
             <Text size="2" color="gray">
               Ask about grammar, usage, word choice, or a more literal translation. Every question is
-              saved for this episode — come back later to review what you wondered about.
+              saved for this {contentLabel} — come back later to review what you wondered about.
             </Text>
           ) : null}
           {messages.map((message) => (
@@ -104,7 +106,7 @@ export function EpisodeChatPanel({
                   type="button"
                   className="message-context"
                   onClick={() => message.contextCueId && onJumpToCue(message.contextCueId)}
-                  title={message.contextCueId ? "Jump back to that cue" : undefined}
+                  title={message.contextCueId ? "Jump back to that passage" : undefined}
                 >
                   About: <strong>{message.contextSelection}</strong>
                   {message.contextCueText ? <span className="message-context-cue"> · {message.contextCueText}</span> : null}

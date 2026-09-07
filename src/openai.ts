@@ -71,8 +71,8 @@ export async function requestFollowUp(
     "",
     `Target language: ${request.targetLanguage}`,
     `Selected text: ${request.targetText}`,
-    `Subtitle context: ${request.cueText}`,
-    prior ? `Previous messages in this episode chat:\n${prior}` : "",
+    `Passage context: ${request.cueText}`,
+    prior ? `Previous messages in this reading chat:\n${prior}` : "",
     `Question: ${question}`,
   ]
     .filter(Boolean)
@@ -119,8 +119,8 @@ async function callResponsesApi(apiKey: string, model: string, input: string): P
  * ------------------------------------------------------------------ */
 
 export const TEACHER_GUIDANCE = [
-  "You are an experienced Dutch language teacher helping a learner understand a real subtitle line.",
-  "Critical: do NOT translate the selected text in isolation. First read the WHOLE subtitle context, then",
+  "You are an experienced Dutch language teacher helping a learner understand a Dutch passage from a subtitle or book.",
+  "Critical: do NOT translate the selected text in isolation. First read the WHOLE passage context, then",
   "decide what the selected text actually means here. Specifically check for:",
   "- Separable verbs (scheidbare werkwoorden): the prefix may live elsewhere in the sentence",
   "  (e.g. \"Daar ga ik nu wat aan doen\" → the verb is \"ergens iets aan doen\", lemma \"aandoen / aan doen\",",
@@ -146,7 +146,7 @@ function buildLookupPrompt(request: LookupRequest, options: PromptOptions) {
       "",
       `Target language for the answer: ${request.targetLanguage}`,
       `Selected sentence: ${request.targetText}`,
-      `Subtitle context (the cue around it): ${request.cueText}`,
+      `Surrounding passage: ${request.cueText}`,
       "",
       "Return only valid JSON, no Markdown, no code fences.",
       "Return exactly this JSON shape:",
@@ -167,7 +167,7 @@ function buildLookupPrompt(request: LookupRequest, options: PromptOptions) {
     `Lookup mode: ${modeLabel}`,
     `Target language for the answer: ${request.targetLanguage}`,
     `Selected text: ${request.targetText}`,
-    `Subtitle context: ${request.cueText}`,
+    `Passage context: ${request.cueText}`,
     "",
     "Return only valid JSON, no Markdown, no code fences.",
     "Return exactly this JSON shape:",

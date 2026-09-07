@@ -20,6 +20,8 @@ import {
   loadAllProgress,
   loadEpisodeChat,
   loadLastTranscript,
+  listSavedUploads,
+  type SavedUpload,
   loadLookup,
   loadReaderProgress,
   loadTranscriptByKey,
@@ -47,7 +49,6 @@ import { Home } from "./components/Home";
 import { Reader } from "./components/Reader";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
-import { getCueDomId } from "./components/CueRow";
 
 type SampleStats = { cues: number; duration: string };
 
@@ -65,6 +66,8 @@ export default function App() {
   const [chatLoading, setChatLoading] = useState(false);
   const [appError, setAppError] = useState("");
   const [progressMap, setProgressMap] = useState<Record<string, ReaderProgress>>(() => loadAllProgress());
+  const [savedUploads, setSavedUploads] = useState<SavedUpload[]>([]);
+  const [uploading, setUploading] = useState(false);
   const [lastResumeKey, setLastResumeKey] = useState<string | undefined>();
 
   useAltPressed();
@@ -75,6 +78,7 @@ export default function App() {
 
   // Restore the last opened transcript on mount, but stay on Home — user picks "Continue" to enter.
   useEffect(() => {
+    void listSavedUploads().then(setSavedUploads).catch((error) => debug("storage", "Could not load uploads", String(error)));
     void loadLastTranscript()
       .then(async (doc) => {
         if (!doc) return;
@@ -144,6 +148,9 @@ export default function App() {
     await saveTranscript(doc);
     setLastTranscriptKey(key);
     setLastResumeKey(key);
+    if (doc.source?.type !== "sample") {
+      setSavedUploads((previous) => [{ key, displayTitle: doc.displayTitle, fileName: doc.fileName, kind: doc.kind, author: doc.author }, ...previous.filter((item) => item.key !== key)]);
+    }
     setTranscript(doc);
     setLookup(undefined);
 
@@ -200,21 +207,40 @@ export default function App() {
   }
 
   async function handleFile(file: File) {
+    if (uploading || loadingSampleSlug) return;
+    setAppError("");
+    setUploading(true);
+    try {
+      let doc: TranscriptDocument;
+      if (/\.epub$/i.test(file.name)) {
+        if (file.size > 30 * 1024 * 1024) throw new Error("This EPUB is too large. Choose a book under 30 MB.");
+        const { parseEpubFile } = await import("./epub");
+        doc = await parseEpubFile(await file.arrayBuffer(), file.name);
+      } else {
+        if (!/\.(srt|vtt)$/i.test(file.name)) throw new Error("Choose an EPUB book or a VTT/SRT subtitle file.");
+        const rawText = await file.text();
+        doc = {
+          kind: "subtitles", fileName: file.name, loadedAt: Date.now(),
+          cues: parseSubtitleFile(rawText), rawText, source: { type: "upload" },
+          displayTitle: file.name.replace(/\.[a-z]+$/i, ""),
+        };
+      }
+      await openTranscriptDocument(doc, { resumeFromProgress: true });
+    } catch (error) {
+      setAppError(error instanceof Error ? error.message : "Could not read this file.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function openSavedUpload(key: string) {
     setAppError("");
     try {
-      const rawText = await file.text();
-      const cues = parseSubtitleFile(rawText);
-      const doc: TranscriptDocument = {
-        fileName: file.name,
-        loadedAt: Date.now(),
-        cues,
-        rawText,
-        source: { type: "upload" },
-        displayTitle: file.name.replace(/\.[a-z]+$/i, ""),
-      };
-      await openTranscriptDocument(doc, { resumeFromProgress: false });
+      const doc = await loadTranscriptByKey(key);
+      if (!doc) throw new Error("This file is no longer saved. Please upload it again.");
+      await openTranscriptDocument(doc, { resumeFromProgress: true });
     } catch (error) {
-      setAppError(error instanceof Error ? error.message : "Could not parse this subtitle file.");
+      setAppError(error instanceof Error ? error.message : "Could not open this file.");
     }
   }
 
@@ -269,6 +295,8 @@ export default function App() {
         request.targetLanguage,
         request.targetText,
         settings.customPrompt,
+        request.cueText,
+        request.mode,
       );
       const cached = await loadLookup(cacheKey);
       if (cached && !isInvalidCachedLookup(cached)) {
@@ -302,6 +330,8 @@ export default function App() {
         request.targetLanguage,
         request.targetText,
         settings.customPrompt,
+        request.cueText,
+        request.mode,
       );
       await deleteLookup(cacheKey);
       await startLookup(request);
@@ -393,18 +423,13 @@ export default function App() {
 
   const handleClearChat = useCallback(async () => {
     if (!transcript) return;
-    if (!window.confirm("Clear all chat history for this episode?")) return;
+    if (!window.confirm(`Clear all chat history for this ${transcript.kind === "epub" ? "book" : "episode"}?`)) return;
     await clearEpisodeChat(makeTranscriptKey(transcript));
     setChatMessages([]);
   }, [transcript]);
 
   const handleJumpToCue = useCallback((cueId: string) => {
-    const el = document.getElementById(getCueDomId(cueId));
-    if (el) {
-      el.scrollIntoView({ block: "center", behavior: "smooth" });
-      el.classList.add("cue-row-flash");
-      window.setTimeout(() => el.classList.remove("cue-row-flash"), 1400);
-    }
+    setPendingScrollCueId(cueId);
   }, []);
 
   async function resetCache() {
@@ -421,13 +446,14 @@ export default function App() {
     const sample = lastResumeKey.startsWith("sample:")
       ? sampleEpisodes.find((s) => `sample:${s.slug}` === lastResumeKey)
       : undefined;
-    const title = sample ? `${sample.title} · S${sample.season}E${sample.episode}` : "Continue your upload";
+    const upload = savedUploads.find((item) => item.key === lastResumeKey);
+    const title = sample ? `${sample.title} · S${sample.season}E${sample.episode}` : upload?.displayTitle ?? upload?.fileName ?? "Continue your upload";
     const cueIndex = progress.cueIndex ?? 0;
     const totalCues = progress.totalCues;
     const ratio = totalCues ? Math.round(((cueIndex + 1) / totalCues) * 100) : 0;
-    const subtitle = `Cue ${cueIndex + 1} of ${totalCues} · ${ratio}% read`;
+    const subtitle = `${upload?.kind === "epub" ? "Passage" : "Cue"} ${cueIndex + 1} of ${totalCues} · ${ratio}% read`;
     return { title, subtitle, progress, onResume: () => void resumeLast() };
-  }, [lastResumeKey, progressMap]);
+  }, [lastResumeKey, progressMap, savedUploads]);
 
   const theme = getTheme(themeId);
   const hasApiKey = Boolean(settings.apiKey.trim());
@@ -457,7 +483,7 @@ export default function App() {
                 Subdiver
               </Heading>
               <Text size="1" color="gray">
-                Dive under Dutch subtitles, word by word
+                Read Dutch subtitles & books, word by word
               </Text>
             </span>
           </button>
@@ -476,7 +502,7 @@ export default function App() {
                   </Heading>
                   <Text size="2" color="gray" as="p">
                     <strong>Click a word</strong> for an instant in-context translation. The card
-                    appears under the subtitle line.
+                    appears under the passage.
                   </Text>
                   <Text size="2" color="gray" as="p">
                     <strong>Hold <kbd>Alt</kbd></strong> (Option on Mac) and hover to highlight the
@@ -487,7 +513,7 @@ export default function App() {
                     <strong>Select a phrase</strong> with the mouse to translate just that fragment.
                   </Text>
                   <Text size="2" color="gray" as="p">
-                    <strong>Episode chat</strong> stores every follow-up you ask, per episode — come
+                    <strong>Reading chat</strong> stores every follow-up you ask, per book or episode — come
                     back later to review the words and constructions that puzzled you.
                   </Text>
                   <Text size="2" color="gray" as="p">
@@ -521,6 +547,7 @@ export default function App() {
 
             {transcript ? (
               <Reader
+                key={makeTranscriptKey(transcript)}
                 transcript={transcript}
                 cues={transcript.cues}
                 settings={settings}
@@ -539,6 +566,9 @@ export default function App() {
               />
             ) : (
               <Home
+                savedUploads={savedUploads}
+                uploading={uploading}
+                onOpenUpload={(key) => void openSavedUpload(key)}
                 hasApiKey={hasApiKey}
                 loadingSampleSlug={loadingSampleSlug}
                 sampleStats={sampleStats}
@@ -553,6 +583,7 @@ export default function App() {
 
           {transcript ? (
             <EpisodeChatPanel
+              contentLabel={transcript.kind === "epub" ? "book" : "episode"}
               open={chatOpen}
               messages={chatMessages}
               loading={chatLoading}

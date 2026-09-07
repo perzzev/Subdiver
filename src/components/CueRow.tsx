@@ -11,6 +11,7 @@ export function getCueDomId(cueId: string) {
 
 type Props = {
   cue: SubtitleCue;
+  isBook?: boolean;
   settings: AppSettings;
   activeLookup?: LookupState;
   onLookup: (request: LookupRequest) => void;
@@ -22,6 +23,7 @@ type Props = {
 
 export const CueRow = memo(function CueRow({
   cue,
+  isBook = false,
   settings,
   activeLookup,
   onLookup,
@@ -84,13 +86,15 @@ export const CueRow = memo(function CueRow({
   }
 
   return (
-    <div className="cue-row" id={getCueDomId(cue.id)} data-cue-id={cue.id}>
-      <span className="cue-time" aria-hidden="true">
+    <div className={`cue-row ${cue.headingLevel ? "book-heading" : ""}`} id={getCueDomId(cue.id)} data-cue-id={cue.id}>
+      {!isBook ? <span className="cue-time" aria-hidden="true">
         {formatTimestamp(cue.startMs)}
-      </span>
+      </span> : null}
 
       <div
         className="cue-text"
+        role={cue.headingLevel ? "heading" : undefined}
+        aria-level={cue.headingLevel}
         ref={textRef}
         onMouseUp={handleSelection}
         onTouchEnd={handleSelection}

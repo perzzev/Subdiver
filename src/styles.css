@@ -735,3 +735,119 @@ body[data-alt-mode] .word-token:hover {
     box-shadow: -18px 0 42px rgba(28, 35, 31, 0.16);
   }
 }
+
+/* Books use the same interactive words on an uncluttered reading page. */
+.book-reader .transcript {
+  gap: 0;
+  padding: 24px clamp(8px, 3vw, 30px);
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.book-reader .cue-row {
+  padding: 8px 12px;
+}
+
+.book-reader .book-heading {
+  padding-top: 24px;
+  padding-bottom: 20px;
+}
+
+.book-reader .book-heading .cue-text {
+  font-size: 1.3em;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.chapter-navigation {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 12px;
+  align-items: center;
+  padding: 0 4px;
+}
+
+.chapter-navigation label {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.chapter-navigation select {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 28px 10px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-card);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  text-overflow: ellipsis;
+}
+
+.chapter-navigation > :last-child {
+  grid-column: 2;
+}
+
+.book-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 0 28px;
+}
+
+.reader {
+  scroll-margin-top: 86px;
+}
+
+.book-reader .cue-sentence {
+  padding: 0;
+}
+
+.book-reader .word-token {
+  padding: 0;
+  margin: 0;
+}
+
+.book-reader .cue-sentence-marker {
+  position: absolute;
+  top: -0.8em;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  font-size: 10px;
+}
+
+.book-reader .cue-row:hover .cue-sentence-marker {
+  opacity: 0;
+}
+
+.book-reader .cue-sentence:hover .cue-sentence-marker,
+.book-reader .cue-sentence:focus-within .cue-sentence-marker {
+  opacity: 1;
+}
+
+body[data-alt-mode] .book-reader .cue-sentence-marker {
+  opacity: 0;
+}
+
+.book-reader .book-heading .cue-text {
+  font-size: calc(var(--cue-size) * 1.2);
+}
+
+.side-panel:not(.open) {
+  visibility: hidden;
+}
+
+@media (max-width: 860px) {
+  .reader {
+    scroll-margin-top: 136px;
+  }
+
+  .book-reader .book-heading .cue-text {
+    font-size: 23px;
+  }
+}
