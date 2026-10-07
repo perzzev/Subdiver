@@ -1,11 +1,14 @@
 import type { EpisodeChatMessage, FollowUpMessage, LookupRequest, LookupResult } from "./types";
 
 type ResponsesApiResult = {
+  status?: string;
+  incomplete_details?: { reason?: string };
   output_text?: string;
   output?: Array<{
     content?: Array<{
       type?: string;
       text?: string;
+      refusal?: string;
     }>;
   }>;
   error?: {
@@ -16,16 +19,44 @@ type ResponsesApiResult = {
 export type PromptOptions = {
   /** Free-form learner notes appended to every prompt. */
   customPrompt?: string;
+  signal?: AbortSignal;
 };
+
+const LOOKUP_FORMAT = {
+  type: "json_schema",
+  name: "dutch_lookup",
+  strict: true,
+  schema: {
+    type: "object",
+    properties: {
+      translation: { type: "string" },
+      lemma: { type: "string" },
+      partOfSpeech: { type: "string" },
+      explanation: { type: "string" },
+    },
+    required: ["translation", "lemma", "partOfSpeech", "explanation"],
+    additionalProperties: false,
+  },
+};
+
+class IncompleteResponseError extends Error {}
 
 export async function requestLookup(
   apiKey: string,
   request: LookupRequest,
   options: PromptOptions = {},
 ): Promise<LookupResult> {
-  const data = await callResponsesApi(apiKey, request.model, buildLookupPrompt(request, options));
-  const text = extractOutputText(data);
-  return parseLookupResult(text);
+  const input = buildLookupPrompt(request, options);
+  try {
+    const data = await callResponsesApi(apiKey, request.model, input, options.signal, LOOKUP_FORMAT);
+    return parseLookupResult(extractOutputText(data));
+  } catch (error) {
+    // Retry only a truncated response, once. Never retry cancellations, refusals,
+    // authorization or rate-limit errors, or quietly change the chosen model.
+    if (!(error instanceof IncompleteResponseError) || options.signal?.aborted) throw error;
+    const data = await callResponsesApi(apiKey, request.model, input, options.signal, LOOKUP_FORMAT, 2400);
+    return parseLookupResult(extractOutputText(data));
+  }
 }
 
 export async function listOpenAiModels(apiKey: string): Promise<string[]> {
@@ -78,11 +109,15 @@ export async function requestFollowUp(
     .filter(Boolean)
     .join("\n");
 
-  const data = await callResponsesApi(apiKey, request.model, prompt);
+  const data = await callResponsesApi(apiKey, request.model, prompt, options.signal);
   return extractOutputText(data);
 }
 
-async function callResponsesApi(apiKey: string, model: string, input: string): Promise<ResponsesApiResult> {
+async function callResponsesApi(
+  apiKey: string, model: string, input: string, signal?: AbortSignal,
+  format?: typeof LOOKUP_FORMAT, maxOutputTokens = 700,
+): Promise<ResponsesApiResult> {
+  const requestSignal = AbortSignal.any([AbortSignal.timeout(30_000), ...(signal ? [signal] : [])]);
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -92,8 +127,14 @@ async function callResponsesApi(apiKey: string, model: string, input: string): P
     body: JSON.stringify({
       model,
       input,
-      max_output_tokens: 700,
+      max_output_tokens: maxOutputTokens,
+      store: false,
+      ...(format ? { text: { format } } : {}),
+      // These models support skipping reasoning. Older GPT-4 models need no
+      // reasoning parameter; original GPT-5 models do not support "none".
+      ...(/^gpt-5\.(?:4(?:-mini|-nano)?|5)(?:-\d{4}-\d{2}-\d{2})?$/.test(model) ? { reasoning: { effort: "none" } } : {}),
     }),
+    signal: requestSignal,
   });
 
   const raw = await response.text();
@@ -101,11 +142,26 @@ async function callResponsesApi(apiKey: string, model: string, input: string): P
   try {
     data = JSON.parse(raw) as ResponsesApiResult;
   } catch {
-    data = { output_text: raw };
+    throw new Error(`OpenAI returned an unreadable response (HTTP ${response.status}). Please try again.`);
   }
 
   if (!response.ok) {
     throw new Error(data.error?.message || `OpenAI request failed with HTTP ${response.status}`);
+  }
+
+  if (data.status === "incomplete") {
+    if (data.incomplete_details?.reason === "max_output_tokens") {
+      throw new IncompleteResponseError("The model reached its response limit. Try a lighter model or retry the lookup.");
+    }
+    throw new Error("The model could not complete this response. Try another passage or model.");
+  }
+  if (data.error || data.status === "failed") {
+    throw new Error(data.error?.message || "The model could not complete this response. Please try again.");
+  }
+  for (const item of data.output || []) {
+    if (item.content?.some((content) => content.type === "refusal")) {
+      throw new Error("The model declined this request. Try another passage.");
+    }
   }
 
   return data;
@@ -118,7 +174,8 @@ async function callResponsesApi(apiKey: string, model: string, input: string): P
  *  modal chains.                                                     *
  * ------------------------------------------------------------------ */
 
-export const TEACHER_GUIDANCE = [
+// Retained for recognizing and upgrading the default saved by older versions.
+export const PREVIOUS_TEACHER_GUIDANCE = [
   "You are an experienced Dutch language teacher helping a learner understand a Dutch passage from a subtitle or book.",
   "Critical: do NOT translate the selected text in isolation. First read the WHOLE passage context, then",
   "decide what the selected text actually means here. Specifically check for:",
@@ -134,6 +191,17 @@ export const TEACHER_GUIDANCE = [
   "describe that whole construction — never just the literal word.",
 ].join("\n");
 
+export const WORD_PARTS_GUIDANCE = [
+  "When the learner clicks a single word, check whether it is a compound or has recognizable roots, prefixes, or suffixes that help explain and remember its meaning.",
+  "If useful, include a compact breakdown in explanation: Dutch part = meaning in the learner's target language, joined with +. You may also add short English glosses when helpful.",
+  "Briefly connect the parts to the word's meaning in this passage and give a memorable association (e.g. straat + lamp = street + lamp → streetlight; translate the glosses into the target language).",
+  "Use the dictionary form for an inflected word where appropriate; distinguish grammatical endings and linking elements from meaningful roots.",
+  "Only use linguistically justified parts. Do not split words merely because letters happen to match, invent etymology, or assume the contextual meaning is always the literal sum of the parts. Skip the breakdown when it is unclear or unhelpful.",
+  "Explain modern word formation; only claim a historical origin if you are certain. Keep the breakdown brief and inside explanation, preserving the contextual translation and the required output format.",
+].join("\n");
+
+export const TEACHER_GUIDANCE = `${PREVIOUS_TEACHER_GUIDANCE}\n${WORD_PARTS_GUIDANCE}`;
+
 function buildLookupPrompt(request: LookupRequest, options: PromptOptions) {
   const teacher = ((options.customPrompt ?? "").trim() || TEACHER_GUIDANCE);
 
@@ -145,6 +213,7 @@ function buildLookupPrompt(request: LookupRequest, options: PromptOptions) {
       "one or two grammar points that matter most for understanding it (not an exhaustive parse).",
       "",
       `Target language for the answer: ${request.targetLanguage}`,
+      `Write translation and explanation in ${request.targetLanguage}. Dutch quotations and brief English word glosses are allowed; do not write whole explanations in Dutch or English unless that is the target language.`,
       `Selected sentence: ${request.targetText}`,
       `Surrounding passage: ${request.cueText}`,
       "",
@@ -163,9 +232,13 @@ function buildLookupPrompt(request: LookupRequest, options: PromptOptions) {
 
   return [
     teacher,
+    // Personal teacher instructions replace the default, but a clicked word
+    // should still receive the requested memory aid when it is appropriate.
+    ...(request.mode === "word" && !teacher.includes(WORD_PARTS_GUIDANCE) ? [WORD_PARTS_GUIDANCE] : []),
     "",
     `Lookup mode: ${modeLabel}`,
     `Target language for the answer: ${request.targetLanguage}`,
+    `Write translation and explanation in ${request.targetLanguage}. Dutch quotations and brief English word glosses are allowed; do not write whole explanations in Dutch or English unless that is the target language.`,
     `Selected text: ${request.targetText}`,
     `Passage context: ${request.cueText}`,
     "",
@@ -179,7 +252,7 @@ function buildLookupPrompt(request: LookupRequest, options: PromptOptions) {
     "  uitleggen). For idioms use the canonical expression. Use the article for nouns (de/het).",
     "- partOfSpeech: in the learner's target language. If the word here is only part of a larger",
     "  construction, say so explicitly (e.g. \"глагол (часть отделяемого aandoen)\").",
-    "- explanation: one or two short sentences. Highlight what is non-obvious for a learner —",
+    "- explanation: one or two short sentences, including a brief word-parts breakdown for a clicked word when useful. Highlight what is non-obvious for a learner —",
     "  separated prefix, idiom, register, false-friend pitfall, irregular form.",
   ].join("\n");
 }
@@ -202,15 +275,16 @@ function parseLookupResult(text: string): LookupResult {
   }
 
   try {
-    const parsed = JSON.parse(cleaned) as Partial<LookupResult>;
-    if (!parsed.translation || !String(parsed.translation).trim()) {
-      throw new Error("The model response did not include a translation. Nothing was cached; try again.");
-    }
+    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) ||
+      typeof parsed.translation !== "string" || !parsed.translation.trim() ||
+      typeof parsed.lemma !== "string" || typeof parsed.partOfSpeech !== "string" ||
+      typeof parsed.explanation !== "string") throw new Error("Invalid lookup fields");
     return {
-      translation: String(parsed.translation),
-      lemma: parsed.lemma ? String(parsed.lemma) : undefined,
-      partOfSpeech: parsed.partOfSpeech ? String(parsed.partOfSpeech) : undefined,
-      explanation: parsed.explanation ? String(parsed.explanation) : "",
+      translation: parsed.translation.trim(),
+      lemma: parsed.lemma || undefined,
+      partOfSpeech: parsed.partOfSpeech || undefined,
+      explanation: parsed.explanation,
     };
   } catch {
     throw new Error("The model returned an invalid lookup format. Nothing was cached; try again.");

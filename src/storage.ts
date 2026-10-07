@@ -156,7 +156,7 @@ export function makeLookupCacheKey(
     mode,
     customPrompt.trim() ? `cp:${shortHash(customPrompt.trim())}` : "",
     // Bumped when the system prompt template changes so stale answers expire.
-    "v3",
+    "v5",
   ]
     .filter(Boolean)
     .join("|");

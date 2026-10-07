@@ -71,6 +71,19 @@ export default function App() {
   const [savedUploads, setSavedUploads] = useState<SavedUpload[]>([]);
   const [uploading, setUploading] = useState(false);
   const [lastResumeKey, setLastResumeKey] = useState<string | undefined>();
+  const lookupController = useRef<AbortController | undefined>(undefined);
+
+  const closeLookup = useCallback(() => {
+    lookupController.current?.abort();
+    lookupController.current = undefined;
+    window.getSelection()?.removeAllRanges();
+    setLookup(undefined);
+  }, []);
+
+  useEffect(() => {
+    closeLookup();
+    return () => lookupController.current?.abort();
+  }, [closeLookup, settings.apiKey, settings.model, settings.targetLanguage, settings.customPrompt]);
 
   useAltPressed();
 
@@ -164,7 +177,7 @@ export default function App() {
       setSavedUploads((previous) => [{ key, displayTitle: doc.displayTitle, fileName: doc.fileName, kind: doc.kind, author: doc.author }, ...previous.filter((item) => item.key !== key)]);
     }
     setTranscript(doc);
-    setLookup(undefined);
+    closeLookup();
 
     if (options.resumeFromProgress) {
       const progress = loadReaderProgress(key);
@@ -264,7 +277,7 @@ export default function App() {
 
   function handleBack() {
     setTranscript(undefined);
-    setLookup(undefined);
+    closeLookup();
     setChatOpen(false);
     setProgressMap(loadAllProgress());
   }
@@ -287,7 +300,12 @@ export default function App() {
   );
 
   const startLookup = useCallback(
-    async (request: LookupRequest) => {
+    async (request: LookupRequest, bypassCache = false) => {
+      lookupController.current?.abort();
+      const controller = new AbortController();
+      lookupController.current = controller;
+      const startedAt = performance.now();
+      window.getSelection()?.removeAllRanges();
       setAppError("");
       setLookup({ request, loading: true, fromCache: false });
 
@@ -310,45 +328,50 @@ export default function App() {
         request.cueText,
         request.mode,
       );
-      const cached = await loadLookup(cacheKey);
-      if (cached && !isInvalidCachedLookup(cached)) {
-        setLookup({ request, result: cached, loading: false, fromCache: true });
-        return;
-      }
-      if (cached) await deleteLookup(cacheKey);
-
       try {
+        // Local storage failures should not prevent a translation.
+        try {
+          if (bypassCache) await deleteLookup(cacheKey);
+          const cached = bypassCache ? undefined : await loadLookup(cacheKey);
+          if (controller.signal.aborted) return;
+          if (cached && !isInvalidCachedLookup(cached)) {
+            setLookup({ request, result: cached, loading: false, fromCache: true });
+            return;
+          }
+          if (cached) await deleteLookup(cacheKey);
+        } catch (error) {
+          debug("storage", "Lookup cache unavailable", String(error));
+        }
+        if (controller.signal.aborted) return;
         const result = await requestLookup(settings.apiKey, request, {
           customPrompt: settings.customPrompt,
+          signal: controller.signal,
         });
-        if (!isInvalidCachedLookup(result)) await saveLookup(cacheKey, result);
-        setLookup({ request, result, loading: false, fromCache: false });
+        if (controller.signal.aborted) return;
+        const durationMs = Math.round(performance.now() - startedAt);
+        setLookup({ request, result, loading: false, fromCache: false, durationMs });
+        debug("lookup", "Translation completed", { model: request.model, mode: request.mode, durationMs });
+        if (!isInvalidCachedLookup(result)) {
+          void saveLookup(cacheKey, result).catch((error) => debug("storage", "Could not cache translation", String(error)));
+        }
       } catch (error) {
+        if (controller.signal.aborted) return;
         setLookup({
           request,
           loading: false,
           fromCache: false,
-          error: error instanceof Error ? error.message : "Lookup failed.",
+          error: error instanceof Error && error.name === "TimeoutError"
+            ? "Translation took too long. Retry or choose a lighter model in Settings."
+            : error instanceof Error ? error.message : "Lookup failed.",
         });
       }
     },
-    [settings.apiKey, settings.customPrompt, settings.model, settings.targetLanguage],
+    [debug, settings.apiKey, settings.customPrompt],
   );
 
   const retryLookup = useCallback(
-    async (request: LookupRequest) => {
-      const cacheKey = makeLookupCacheKey(
-        request.model,
-        request.targetLanguage,
-        request.targetText,
-        settings.customPrompt,
-        request.cueText,
-        request.mode,
-      );
-      await deleteLookup(cacheKey);
-      await startLookup(request);
-    },
-    [settings.customPrompt, startLookup],
+    (request: LookupRequest) => { void startLookup(request, true); },
+    [startLookup],
   );
 
   const persistConversations = useCallback(
@@ -505,8 +528,8 @@ export default function App() {
   }, []);
 
   async function resetCache() {
+    closeLookup();
     await clearLookupCache();
-    setLookup(undefined);
   }
 
   const continueInfo = useMemo(() => {
@@ -573,8 +596,8 @@ export default function App() {
                     How to use Subdiver
                   </Heading>
                   <Text size="2" color="gray" as="p">
-                    <strong>Click a word</strong> for an instant in-context translation. The card
-                    appears under the passage.
+                    <strong>Click a word</strong> for an in-context translation. It stays beside
+                    the text on wide screens and in a compact bottom panel on smaller screens.
                   </Text>
                   <Text size="2" color="gray" as="p">
                     <strong>Hold <kbd>Alt</kbd></strong> (Option on Mac) and hover to highlight the
@@ -607,7 +630,7 @@ export default function App() {
           </Flex>
         </header>
 
-        <main className={`app-layout ${chatOpen && transcript ? "with-panel" : ""}`}>
+        <main className={`app-layout ${transcript ? "reading-layout" : ""} ${chatOpen && transcript ? "with-panel" : ""}`}>
           <section className="app-main">
             {appError ? (
               <Callout.Root color="red" mb="4">
@@ -627,10 +650,11 @@ export default function App() {
                 lookup={lookup}
                 resumeCueId={pendingScrollCueId}
                 chatBadge={conversations.reduce((total, c) => total + c.messages.length, 0)}
+                chatOpen={chatOpen}
                 onResumeComplete={() => setPendingScrollCueId(undefined)}
                 onVisibleCueChange={handleVisibleCueChange}
                 onLookup={(req) => void startLookup(req)}
-                onCloseLookup={() => setLookup(undefined)}
+                onCloseLookup={closeLookup}
                 onRetryLookup={retryLookup}
                 onAskFollowUp={handleAskFollowUp}
                 onBack={handleBack}
@@ -701,6 +725,7 @@ function appendToConversation(
 }
 
 function isInvalidCachedLookup(result: LookupResult) {
+  if (typeof result.translation !== "string" || typeof result.explanation !== "string") return true;
   const translation = result.translation.trim().toLowerCase();
   const explanation = result.explanation.trim().toLowerCase();
   return (

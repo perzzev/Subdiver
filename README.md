@@ -79,10 +79,84 @@ http://127.0.0.1:5173/
    this walkthrough is a useful reference: <https://www.youtube.com/watch?v=SzPE_AE0eEo>
 3. Click **Load models** to fetch text-capable models on your account, then choose one.
    `gpt-4.1-mini` is a good default.
+   The old `gpt-5.5` default is migrated once to `gpt-4.1-mini`; other saved model
+   choices are preserved. You can choose `gpt-5.5` again afterwards.
 4. Set the target language for translations (default: Russian).
 5. Pick a bundled Zuidas episode, or drop in your own EPUB/VTT/SRT. For books, choose a chapter from the chapter menu.
 6. Click a word to translate it; hold Alt to translate the surrounding sentence.
 7. Press **Ask follow-up** in any translation to open the chat thread for that book or episode.
+
+## Translation speed and reliability
+
+Lookups use the Responses API with a strict JSON schema, so the output format is
+enforced by the API. Refusals, failed generations and incomplete responses get
+specific errors. A response truncated by the token limit is retried once with
+a larger budget; other errors are not automatically retried. Each HTTP request
+has a 30-second timeout. The teacher instructions and contextual translation
+guidance are preserved.
+
+For clicked words, the teacher also gives a brief breakdown of meaningful
+compound parts, roots or affixes when this helps explain and remember the word.
+Parts are glossed in the target language, optionally with English glosses.
+The guidance avoids invented etymology and forced splits, and keeps the memory
+aid inside the existing explanation. Saved default instructions are upgraded
+automatically; personal instructions are preserved and still receive this rule
+for word lookups. The cache version changes so old answers are refreshed.
+
+A new word, phrase or sentence cancels the previous lookup and clears the browser
+selection. Late responses, errors and cache reads cannot overwrite the current
+card. Closing the card, navigating away or changing translation settings also
+cancels the lookup. Successful answers show their end-to-end duration; cached
+answers are marked separately.
+
+Translations stay in a fixed side panel on screens at least 1100 pixels wide,
+and a compact bottom panel on smaller screens. The panel scrolls internally for
+long answers and never inserts space between paragraphs. A permanent reading
+gutter leaves room to scroll the last paragraph above the bottom panel. The
+selected passage is highlighted, and reading chat uses the same side space on
+wide screens. Neither loading, changing nor closing a translation moves the text.
+
+Settings includes **Compare speed**: it translates a word and a sentence in the
+same Dutch passage with each of four models, sequentially and without the cache.
+It uses your API key and makes 8 billed requests (a token-limit retry can add a
+request). Results show timing, translations and explanations, so you can judge
+quality yourself. A single run is a sample, not a statistically reliable benchmark.
+Model availability depends on your account; unavailable models show their API error.
+
+For a reproducible live comparison using the application's actual lookup code
+and an API key supplied by Infisical (Node.js 24+):
+
+```bash
+infisical run --env=dev -- npm run benchmark:lookups
+```
+
+The default run makes 48 billed requests: six Dutch examples, four models, two
+rounds, in rotating sequential order. Set `BENCHMARK_REASONING_BASELINE=1` to add
+four GPT-5.5 requests at medium reasoning. `BENCHMARK_ROUNDS`, `BENCHMARK_MODELS`
+(comma-separated preset model IDs), `BENCHMARK_CASES` (comma-separated case IDs),
+and `BENCHMARK_OUTPUT` can limit or separate runs. Results are saved to
+`test-results/lookup-benchmark.json`, including translations, latency and token
+usage, without API keys or headers. This is a small sample, not a guarantee of
+latency or quality. GPT-4.1 nano made contextual translation errors in our live
+sample; GPT-4.1 mini remains the default.
+See the [October 7 live benchmark report](reports/lookup-benchmark-2026-10-07.md)
+for measured timings, token costs and translation-quality observations.
+
+Standard prices in USD per million tokens, checked October 7, 2026:
+
+| Model | Input | Output |
+| --- | ---: | ---: |
+| [GPT-4.1 mini](https://developers.openai.com/api/docs/models/gpt-4.1-mini) (default) | $0.40 | $1.60 |
+| [GPT-4o mini](https://developers.openai.com/api/docs/models/gpt-4o-mini) | $0.15 | $0.60 |
+| [GPT-4.1 nano](https://developers.openai.com/api/docs/models/gpt-4.1-nano) | $0.10 | $0.40 |
+| [GPT-5.5](https://developers.openai.com/api/docs/models/gpt-5.5) (previous default) | $5.00 | $30.00 |
+
+GPT-4 models do not have a reasoning step. For GPT-5.4 (including mini/nano) and
+GPT-5.5, lookups and follow-ups explicitly use `reasoning.effort: none`. Other
+custom models retain their own default reasoning settings. Custom models must
+support the Responses API and Structured Outputs for lookups; there is no silent
+fallback to a different model or a weaker output format. See the official
+[Structured Outputs guide](https://developers.openai.com/api/docs/guides/structured-outputs).
 
 ## Build & deploy
 

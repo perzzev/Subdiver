@@ -18,7 +18,7 @@ test("EPUB words, sentences, selections, chat, pagination and progress survive r
   await page.route("https://api.openai.com/v1/responses", async (route) => {
     const prompt = route.request().postDataJSON().input as string;
     prompts.push(prompt);
-    const reply = prompt.includes("Question:") ? "Opbellen is a separable verb." : JSON.stringify({ translation: "He calls me.", lemma: "opbellen", explanation: "The prefix op belongs to belt." });
+    const reply = prompt.includes("Question:") ? "Opbellen is a separable verb." : JSON.stringify({ translation: "He calls me.", lemma: "opbellen", partOfSpeech: "verb", explanation: "The prefix op belongs to belt." });
     await route.fulfill({ json: { output_text: reply } });
   });
   await page.goto("/");
@@ -26,13 +26,17 @@ test("EPUB words, sentences, selections, chat, pagination and progress survive r
   await expect(page.getByRole("heading", { name: "Een kleine reis" })).toBeVisible();
   await expect(page.locator(".cue-time")).toHaveCount(0);
   await expect(page.locator(".cue-row")).toHaveCount(40);
+  const bookHeight = await page.locator(".transcript").evaluate((element) => element.getBoundingClientRect().height);
   await page.locator(".word-token").filter({ hasText: /^belt$/ }).first().click();
   await expect(page.getByRole("dialog", { name: "Translation" })).toContainText("He calls me.");
+  expect(await page.locator(".transcript").evaluate((element) => element.getBoundingClientRect().height)).toBe(bookHeight);
+  await expect(page.getByRole("dialog", { name: "Translation" })).toHaveCSS("opacity", "1");
+  await page.screenshot({ path: "test-results/translation-book.png" });
   expect(prompts.at(-1)).toContain("Passage context: Hij belt mij op. Dit is alinea 1.");
   await page.getByRole("button", { name: "Close translation" }).click();
   await page.locator(".word-token").filter({ hasText: /^belt$/ }).first().click({ modifiers: ["Alt"] });
   await expect(page.getByRole("dialog", { name: "Translation" })).toContainText("sentence");
-  expect(prompts.at(-1)).toContain("Selected sentence: Hij belt mij op.");
+  await expect.poll(() => prompts.at(-1)).toContain("Selected sentence: Hij belt mij op.");
   await page.getByRole("button", { name: "Close translation" }).click();
   const paragraph = page.locator(".cue-text").nth(1);
   await paragraph.evaluate((element) => {

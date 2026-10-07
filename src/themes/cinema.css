@@ -51,7 +51,7 @@
   background: rgba(232, 177, 74, 0.04);
 }
 
-:root[data-theme="cinema"] .inline-lookup {
+:root[data-theme="cinema"] .lookup-panel {
   background: var(--surface-elevated);
   border-color: var(--border-strong);
 }

@@ -49,6 +49,7 @@ export type LookupState = {
   error?: string;
   loading: boolean;
   fromCache: boolean;
+  durationMs?: number;
 };
 
 export type FollowUpMessage = {

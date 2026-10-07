@@ -16,6 +16,7 @@ import { useState } from "react";
 import { listOpenAiModels } from "../openai";
 import { defaultSettings } from "../settings";
 import type { AppSettings } from "../types";
+import { ModelComparison } from "./ModelComparison";
 
 const CUSTOM_PROMPT_PLACEHOLDER = [
   "Examples:",
@@ -149,6 +150,7 @@ export function SettingsDialog({
               </Text>
             ) : null}
           </div>
+          <ModelComparison settings={settings} onChange={onChange} open={open} />
           <label className="checkbox-row">
             <input
               type="checkbox"

@@ -1,9 +1,8 @@
-import { memo, useMemo, useRef } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import type { AppSettings, LookupRequest, LookupState, SubtitleCue } from "../types";
 import { formatTimestamp } from "../subtitles";
 import { tokenizeCueWithSentences } from "../sentences";
 import { getCleanSelectionText } from "../utils/selection";
-import { InlineLookup } from "./InlineLookup";
 
 export function getCueDomId(cueId: string) {
   return `cue-row-${cueId}`;
@@ -15,9 +14,6 @@ type Props = {
   settings: AppSettings;
   activeLookup?: LookupState;
   onLookup: (request: LookupRequest) => void;
-  onCloseLookup: () => void;
-  onRetryLookup: (request: LookupRequest) => void;
-  onAskFollowUp: () => void;
   onDebug: (scope: string, message: string, data?: unknown) => void;
 };
 
@@ -27,13 +23,18 @@ export const CueRow = memo(function CueRow({
   settings,
   activeLookup,
   onLookup,
-  onCloseLookup,
-  onRetryLookup,
-  onAskFollowUp,
   onDebug,
 }: Props) {
   const { tokens, sentences } = useMemo(() => tokenizeCueWithSentences(cue.text), [cue.text]);
   const textRef = useRef<HTMLDivElement>(null);
+  const selectionTimer = useRef<number | undefined>(undefined);
+  const suppressSelectionClick = useRef(false);
+  useEffect(() => () => window.clearTimeout(selectionTimer.current), []);
+
+  function translate(targetText: string, mode: "word" | "selection" | "sentence") {
+    window.clearTimeout(selectionTimer.current);
+    onLookup(buildRequest(targetText, mode));
+  }
 
   function buildRequest(
     targetText: string,
@@ -51,12 +52,17 @@ export const CueRow = memo(function CueRow({
     };
   }
 
-  function handleSelection() {
-    window.setTimeout(() => {
-      const selected = getCleanSelectionText(".cue-text", ".cue-time, .cue-sentence-marker");
-      if (!selected || selected.length < 2) return;
+  function handleSelection(event: React.MouseEvent | React.TouchEvent) {
+    if ((event.target as HTMLElement).closest(".cue-sentence-marker") || event.altKey) return;
+    const selected = getCleanSelectionText(".cue-text", ".cue-time, .cue-sentence-marker");
+    if (!selected) return;
+    suppressSelectionClick.current = true;
+    window.clearTimeout(selectionTimer.current);
+    // Capture this gesture now, not whatever selection a later click leaves.
+    // Defer until click so the trailing click of a drag cannot become a word lookup.
+    selectionTimer.current = window.setTimeout(() => {
       onDebug("selection", "Mouse/touch selection accepted", { selected, cueIndex: cue.index });
-      onLookup(buildRequest(selected, "selection"));
+      translate(selected, "selection");
     }, 0);
   }
 
@@ -64,29 +70,39 @@ export const CueRow = memo(function CueRow({
   const grouped = useMemo(() => groupTokensBySentence(tokens), [tokens]);
 
   function handleWordClick(word: string, sentenceIndex: number, event: React.MouseEvent | React.KeyboardEvent) {
-    // If user has live text selection, defer to selection handler.
-    const liveSel = window.getSelection()?.toString().trim();
-    if (liveSel && liveSel.length > 1) return;
-
     // Alt key → translate full sentence instead of just the word.
     const altKey =
       "altKey" in event && (event as React.MouseEvent | React.KeyboardEvent).altKey;
     if (altKey) {
+      suppressSelectionClick.current = false;
       const sentence = sentences[sentenceIndex]?.text ?? cue.text;
-      onLookup(buildRequest(sentence, "sentence"));
+      translate(sentence, "sentence");
       return;
     }
 
-    onLookup(buildRequest(word, "word"));
+    // Some browsers deliver click after the selection timer has already cleared
+    // the native range. Remember the gesture until that trailing click arrives.
+    if (event.type === "click" && suppressSelectionClick.current) {
+      suppressSelectionClick.current = false;
+      return;
+    }
+    suppressSelectionClick.current = false;
+
+    // A drag's trailing mouse click belongs to the selection handler. Keyboard
+    // activation is an explicit new lookup even if browser selection remains.
+    if (event.type === "click" && getCleanSelectionText(".cue-text", ".cue-time, .cue-sentence-marker")) return;
+
+    translate(word, "word");
   }
 
   function handleSentenceMarker(sentenceIndex: number) {
+    suppressSelectionClick.current = false;
     const sentence = sentences[sentenceIndex]?.text ?? cue.text;
-    onLookup(buildRequest(sentence, "sentence"));
+    translate(sentence, "sentence");
   }
 
   return (
-    <div className={`cue-row ${cue.headingLevel ? "book-heading" : ""}`} id={getCueDomId(cue.id)} data-cue-id={cue.id}>
+    <div className={`cue-row ${cue.headingLevel ? "book-heading" : ""}`} id={getCueDomId(cue.id)} data-cue-id={cue.id} data-active-lookup={Boolean(activeLookup)}>
       {!isBook ? <span className="cue-time" aria-hidden="true">
         {formatTimestamp(cue.startMs)}
       </span> : null}
@@ -96,6 +112,10 @@ export const CueRow = memo(function CueRow({
         role={cue.headingLevel ? "heading" : undefined}
         aria-level={cue.headingLevel}
         ref={textRef}
+        onPointerDown={() => {
+          suppressSelectionClick.current = false;
+          window.clearTimeout(selectionTimer.current);
+        }}
         onMouseUp={handleSelection}
         onTouchEnd={handleSelection}
       >
@@ -124,6 +144,7 @@ export const CueRow = memo(function CueRow({
                   className="word-token"
                   key={`${group.sentenceIndex}-${index}`}
                   role="button"
+                  aria-pressed={activeLookup?.request.mode === "word" && activeLookup.request.targetText === token.text}
                   tabIndex={0}
                   title="Click to translate · Alt+click for the sentence"
                   onClick={(event) => handleWordClick(token.text, group.sentenceIndex, event)}
@@ -143,14 +164,6 @@ export const CueRow = memo(function CueRow({
         ))}
       </div>
 
-      {activeLookup ? (
-        <InlineLookup
-          lookup={activeLookup}
-          onAsk={onAskFollowUp}
-          onClose={onCloseLookup}
-          onRetry={onRetryLookup}
-        />
-      ) : null}
     </div>
   );
 });

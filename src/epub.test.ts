@@ -21,7 +21,7 @@ function book(overrides: Record<string, string> = {}) {
     "OPS/Text/tweede.xhtml": xhtml('<p>De laatste bladzijde.</p>'),
     ...overrides,
   };
-  return zipSync(Object.fromEntries(Object.entries(files).map(([path, text]) => [path, strToU8(text)]))).buffer as ArrayBuffer;
+  return zipSync(Object.fromEntries(Object.entries(files).map(([path, text]) => [path, strToU8(text)])), { mtime: new Date("2020-01-01T00:00:00Z") }).buffer as ArrayBuffer;
 }
 
 describe("EPUB import", () => {

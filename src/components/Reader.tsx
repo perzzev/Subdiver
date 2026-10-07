@@ -3,6 +3,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight, MessageSquareText } from "lucide-
 import { useEffect, useRef, useState } from "react";
 import type { AppSettings, LookupRequest, LookupState, SubtitleCue, TranscriptDocument } from "../types";
 import { CueRow, getCueDomId } from "./CueRow";
+import { LookupPanel } from "./LookupPanel";
 
 type Props = {
   transcript: TranscriptDocument;
@@ -11,6 +12,7 @@ type Props = {
   lookup?: LookupState;
   resumeCueId?: string;
   chatBadge?: number;
+  chatOpen?: boolean;
   onResumeComplete: () => void;
   onVisibleCueChange: (cueId: string, index: number) => void;
   onLookup: (request: LookupRequest) => void;
@@ -29,6 +31,7 @@ export function Reader({
   lookup,
   resumeCueId,
   chatBadge,
+  chatOpen = false,
   onResumeComplete,
   onVisibleCueChange,
   onLookup,
@@ -112,14 +115,14 @@ export function Reader({
     };
   }, [cues, chapterIndex, pageIndex, onVisibleCueChange, resumeCueId]);
 
-  // Close inline lookup on Escape.
+  // Close the translation panel on Escape without moving focus or scrolling.
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape" && lookup) onCloseLookup();
+      if (event.key === "Escape" && lookup && !chatOpen) onCloseLookup();
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [lookup, onCloseLookup]);
+  }, [lookup, chatOpen, onCloseLookup]);
 
   const title = transcript.displayTitle ?? transcript.fileName.replace(/\.[a-z]+$/i, "");
 
@@ -169,9 +172,6 @@ export function Reader({
             settings={settings}
             activeLookup={lookup && lookup.request.cueId === cue.id ? lookup : undefined}
             onLookup={onLookup}
-            onCloseLookup={onCloseLookup}
-            onRetryLookup={onRetryLookup}
-            onAskFollowUp={onAskFollowUp}
             onDebug={onDebug}
           />
         ))}
@@ -186,6 +186,9 @@ export function Reader({
             Next <ChevronRight size={16} />
           </Button>
         </nav>
+      ) : null}
+      {lookup && !chatOpen ? (
+        <LookupPanel lookup={lookup} onAsk={onAskFollowUp} onClose={onCloseLookup} onRetry={onRetryLookup} />
       ) : null}
     </div>
   );
