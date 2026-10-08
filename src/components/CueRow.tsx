@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef } from "react";
 import type { AppSettings, LookupRequest, LookupState, SubtitleCue } from "../types";
 import { formatTimestamp } from "../subtitles";
 import { tokenizeCueWithSentences } from "../sentences";
-import { getCleanSelectionText } from "../utils/selection";
+import { getCleanSelection, getCleanSelectionText } from "../utils/selection";
 
 export function getCueDomId(cueId: string) {
   return `cue-row-${cueId}`;
@@ -31,18 +31,19 @@ export const CueRow = memo(function CueRow({
   const suppressSelectionClick = useRef(false);
   useEffect(() => () => window.clearTimeout(selectionTimer.current), []);
 
-  function translate(targetText: string, mode: "word" | "selection" | "sentence") {
+  function translate(targetText: string, mode: "word" | "selection" | "sentence", cueText = cue.text) {
     window.clearTimeout(selectionTimer.current);
-    onLookup(buildRequest(targetText, mode));
+    onLookup(buildRequest(targetText, mode, cueText));
   }
 
   function buildRequest(
     targetText: string,
     mode: "word" | "selection" | "sentence",
+    cueText = cue.text,
   ): LookupRequest {
     return {
       targetText,
-      cueText: cue.text,
+      cueText,
       cueId: cue.id,
       cueStartMs: cue.startMs,
       cueEndMs: cue.endMs,
@@ -54,7 +55,7 @@ export const CueRow = memo(function CueRow({
 
   function handleSelection(event: React.MouseEvent | React.TouchEvent) {
     if ((event.target as HTMLElement).closest(".cue-sentence-marker") || event.altKey) return;
-    const selected = getCleanSelectionText(".cue-text", ".cue-time, .cue-sentence-marker");
+    const { text: selected, context } = getCleanSelection(".cue-text", ".cue-time, .cue-sentence-marker");
     if (!selected) return;
     suppressSelectionClick.current = true;
     window.clearTimeout(selectionTimer.current);
@@ -62,7 +63,7 @@ export const CueRow = memo(function CueRow({
     // Defer until click so the trailing click of a drag cannot become a word lookup.
     selectionTimer.current = window.setTimeout(() => {
       onDebug("selection", "Mouse/touch selection accepted", { selected, cueIndex: cue.index });
-      translate(selected, "selection");
+      translate(selected, "selection", context);
     }, 0);
   }
 

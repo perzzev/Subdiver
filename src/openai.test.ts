@@ -11,7 +11,7 @@ function reply(data: unknown, status = 200) { return new Response(JSON.stringify
 afterEach(() => vi.unstubAllGlobals());
 
 describe("structured lookups", () => {
-  it.each(["word", "sentence"] as const)("keeps personal instructions and adds word-parts guidance only for clicked words: %s", async (mode) => {
+  it.each(["word", "sentence", "selection"] as const)("keeps personal instructions and adds word-parts guidance only for clicked words: %s", async (mode) => {
     const fetch = vi.fn().mockResolvedValue(reply({ output_text: JSON.stringify(result) }));
     vi.stubGlobal("fetch", fetch);
     await requestLookup("test-key", { ...request, mode }, { customPrompt: "Always explain in simple Russian." });

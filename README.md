@@ -109,6 +109,11 @@ card. Closing the card, navigating away or changing translation settings also
 cancels the lookup. Successful answers show their end-to-end duration; cached
 answers are marked separately.
 
+Text selections may span several sentences or passages. The entire selection is
+translated in order, with the full selected passages supplied as context, while
+timestamps and sentence buttons are excluded. Selection translations have their
+own instructions rather than the single-word dictionary rules.
+
 Translations stay in a fixed side panel on screens at least 1100 pixels wide,
 and a compact bottom panel on smaller screens. The panel scrolls internally for
 long answers and never inserts space between paragraphs. A permanent reading

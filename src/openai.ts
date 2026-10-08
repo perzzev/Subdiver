@@ -205,30 +205,36 @@ export const TEACHER_GUIDANCE = `${PREVIOUS_TEACHER_GUIDANCE}\n${WORD_PARTS_GUID
 function buildLookupPrompt(request: LookupRequest, options: PromptOptions) {
   const teacher = ((options.customPrompt ?? "").trim() || TEACHER_GUIDANCE);
 
-  if (request.mode === "sentence") {
+  if (request.mode === "sentence" || request.mode === "selection") {
+    const selection = request.mode === "selection";
     return [
       teacher,
       "",
-      "The learner has selected a full Dutch sentence and wants a natural translation plus the",
-      "one or two grammar points that matter most for understanding it (not an exhaustive parse).",
+      selection
+        ? "The learner has selected Dutch text: it may be a word, a phrase, several sentences, or several paragraphs."
+        : "The learner has selected a full Dutch sentence.",
+      "The learner wants a complete natural translation plus one or two grammar points that matter most for understanding it (not an exhaustive parse).",
+      ...(selection ? [
+        "Translate ALL selected text, from the first selected word through the last, in its original order.",
+        "Include every selected sentence and paragraph; do not summarize, omit later sentences, or focus only on the first word, phrase or sentence.",
+        "Use the surrounding passages for context, but translate only the selection. For a phrase that is part of a larger construction, explain that construction briefly without losing any selected text.",
+      ] : []),
       "",
       `Target language for the answer: ${request.targetLanguage}`,
       `Write translation and explanation in ${request.targetLanguage}. Dutch quotations and brief English word glosses are allowed; do not write whole explanations in Dutch or English unless that is the target language.`,
-      `Selected sentence: ${request.targetText}`,
+      `${selection ? "Selected text" : "Selected sentence"}: ${request.targetText}`,
       `Surrounding passage: ${request.cueText}`,
       "",
       "Return only valid JSON, no Markdown, no code fences.",
       "Return exactly this JSON shape:",
-      '{"translation":"...","lemma":"","partOfSpeech":"sentence","explanation":"..."}',
-      "- translation: natural, idiomatic, not literal.",
+      selection
+        ? '{"translation":"...","lemma":"...","partOfSpeech":"...","explanation":"..."}'
+        : '{"translation":"...","lemma":"","partOfSpeech":"sentence","explanation":"..."}',
+      "- translation: the complete natural, idiomatic translation, not literal. Preserve the sentence boundaries.",
+      ...(selection ? ["- lemma and partOfSpeech: for a word or short phrase, give its dictionary form and classification when useful. For multiple sentences, leave lemma empty and classify it as selected text in the target language."] : []),
       "- explanation: one or two short sentences explaining the grammar / idiom that matters here.",
     ].join("\n");
   }
-
-  const modeLabel =
-    request.mode === "selection"
-      ? "A multi-word selection. Treat it as a phrase, not a single word."
-      : "A single word click. Check whether the surrounding sentence makes this part of a larger construction.";
 
   return [
     teacher,
@@ -236,7 +242,7 @@ function buildLookupPrompt(request: LookupRequest, options: PromptOptions) {
     // should still receive the requested memory aid when it is appropriate.
     ...(request.mode === "word" && !teacher.includes(WORD_PARTS_GUIDANCE) ? [WORD_PARTS_GUIDANCE] : []),
     "",
-    `Lookup mode: ${modeLabel}`,
+    "Lookup mode: A single word click. Check whether the surrounding sentence makes this part of a larger construction.",
     `Target language for the answer: ${request.targetLanguage}`,
     `Write translation and explanation in ${request.targetLanguage}. Dutch quotations and brief English word glosses are allowed; do not write whole explanations in Dutch or English unless that is the target language.`,
     `Selected text: ${request.targetText}`,

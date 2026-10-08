@@ -84,6 +84,37 @@ test("selection clears and subsequent sentence and word clicks use the current t
   expect(prompts).toHaveLength(4);
 });
 
+for (const gesture of ["same passage", "multiple passages", "backwards"] as const) {
+  test(`dragging across multiple sentences translates the entire selection once: ${gesture}`, async ({ page }) => {
+    const crossesPassages = gesture !== "same passage";
+    const selected = `Hij belt mij op. Ik lees een boek.${crossesPassages ? " Wij lezen samen." : ""}`;
+    const translated = `He calls me. I read a book.${crossesPassages ? " We read together." : ""}`;
+    const prompts: string[] = [];
+    await page.route("https://api.openai.com/v1/responses", async (route) => {
+      prompts.push(route.request().postDataJSON().input);
+      await route.fulfill({ json: translation(translated) });
+    });
+    await openReader(page);
+    const first = await page.locator(".word-token").filter({ hasText: /^Hij$/ }).boundingBox();
+    const last = await page.locator(".word-token").filter({ hasText: crossesPassages ? /^samen$/ : /^boek$/ }).boundingBox();
+    const start = { x: first!.x - 1, y: first!.y + first!.height / 2 };
+    const end = { x: last!.x + last!.width + 8, y: last!.y + last!.height / 2 };
+    const [from, to] = gesture === "backwards" ? [end, start] : [start, end];
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 20 });
+    await page.mouse.up();
+    const panel = page.getByRole("dialog", { name: "Translation" });
+    await expect(panel).toContainText(translated);
+    await expect(panel).toContainText(selected);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain(`Selected text: ${selected}\n`);
+    expect(prompts[0]).toContain(`Surrounding passage: ${selected}\n`);
+    expect(prompts[0]).not.toContain("00:");
+    await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("");
+  });
+}
+
 test("changing targets and closing the card abort the previous HTTP requests", async ({ page }) => {
   await page.addInitScript(() => {
     const originalFetch = window.fetch;

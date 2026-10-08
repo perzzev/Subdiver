@@ -155,8 +155,9 @@ export function makeLookupCacheKey(
     normalizeTarget(cueText),
     mode,
     customPrompt.trim() ? `cp:${shortHash(customPrompt.trim())}` : "",
-    // Bumped when the system prompt template changes so stale answers expire.
-    "v5",
+    // Refresh selection answers after changing their scope instructions;
+    // keep the word and sentence caches from the previous release.
+    mode === "selection" ? "v6" : "v5",
   ]
     .filter(Boolean)
     .join("|");
