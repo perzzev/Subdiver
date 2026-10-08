@@ -1,6 +1,7 @@
 import { Badge, Button, Callout, Flex, IconButton, Spinner, Text } from "@radix-ui/themes";
 import { Info, MessageSquareText, X } from "lucide-react";
 import type { LookupRequest, LookupState } from "../types";
+import { getLearningHintLevel } from "../openai";
 
 export function LookupPanel({
   lookup,
@@ -13,6 +14,7 @@ export function LookupPanel({
   onClose: () => void;
   onRetry: (request: LookupRequest) => void;
 }) {
+  const learnerLevel = getLearningHintLevel(lookup.request);
   return (
     <div className="lookup-panel" role="dialog" aria-label="Translation" aria-modal="false">
       <Flex justify="between" align="start" gap="3" className="lookup-panel-head">
@@ -81,6 +83,12 @@ export function LookupPanel({
               <Text size="2" color="gray" as="p" mt="2">
                 {lookup.result.explanation}
               </Text>
+            ) : null}
+            {learnerLevel && lookup.result.learningTip ? (
+              <Callout.Root color="teal" variant="soft" size="1" mt="3" className="lookup-learning-tip">
+                <Callout.Icon><Info size={16} /></Callout.Icon>
+                <Callout.Text><strong>Worth knowing at {learnerLevel}</strong><br />{lookup.result.learningTip}</Callout.Text>
+              </Callout.Root>
             ) : null}
             <Flex gap="2" mt="3">
               <Button variant="soft" onClick={onAsk}>

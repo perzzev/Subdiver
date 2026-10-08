@@ -114,6 +114,22 @@ translated in order, with the full selected passages supplied as context, while
 timestamps and sentence buttons are excluded. Selection translations have their
 own instructions rather than the single-word dictionary rules.
 
+In Settings, **Your Dutch level (CEFR)** lets you choose A1–C2. With no level set,
+learning hints are off. A clicked word or a highlighted single word can receive
+a short hint in the target language explaining that it is common vocabulary
+worth knowing at your current level. Sentences and multi-word selections do not
+receive these hints.
+
+The teacher assesses current general-language frequency, register and an
+approximate earliest useful level in the same lookup request. The application
+shows a hint only for common, general vocabulary at or below the chosen level;
+literary, archaic, specialist, proper-name and uncertain assessments are hidden,
+even if the model supplies a recommendation. These are teacher estimates, not
+an official CEFR word list. Changing the level cancels an active lookup and uses
+a separate cache key, so hints for another level cannot reappear.
+See the [October 8 learning-hint check](reports/learning-hints-2026-10-08.md) for
+the tested examples and limits of the model's estimates.
+
 Translations stay in a fixed side panel on screens at least 1100 pixels wide,
 and a compact bottom panel on smaller screens. The panel scrolls internally for
 long answers and never inserts space between paragraphs. A permanent reading

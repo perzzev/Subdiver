@@ -24,6 +24,7 @@ export function ModelComparison({ settings, onChange, open }: {
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [running, setRunning] = useState(false);
   const [language, setLanguage] = useState("");
+  const [learnerLevel, setLearnerLevel] = useState<AppSettings["learnerLevel"]>("");
   const controllerRef = useRef<AbortController | undefined>(undefined);
 
   useEffect(() => {
@@ -32,7 +33,7 @@ export function ModelComparison({ settings, onChange, open }: {
       setRunning(false);
     }
     return () => controllerRef.current?.abort();
-  }, [open, settings.apiKey, settings.customPrompt, settings.targetLanguage]);
+  }, [open, settings.apiKey, settings.customPrompt, settings.targetLanguage, settings.learnerLevel]);
 
   async function compare() {
     controllerRef.current?.abort();
@@ -41,6 +42,7 @@ export function ModelComparison({ settings, onChange, open }: {
     setRunning(true);
     setMeasurements([]);
     setLanguage(settings.targetLanguage);
+    setLearnerLevel(settings.learnerLevel);
     // Sequential requests avoid timing models while they compete with each
     // other on the same connection. Cache is deliberately bypassed.
     const rows: Measurement[] = [];
@@ -56,6 +58,7 @@ export function ModelComparison({ settings, onChange, open }: {
             result = await requestLookup(settings.apiKey, {
               model: model.id, targetLanguage: settings.targetLanguage,
               targetText: mode === "word" ? "belt" : PASSAGE,
+              learnerLevel: settings.learnerLevel || undefined,
               cueText: PASSAGE, cueId: "comparison", cueStartMs: 0, cueEndMs: 0, mode,
             }, { customPrompt: settings.customPrompt, signal: controller.signal });
           } catch (cause) {
@@ -99,7 +102,7 @@ export function ModelComparison({ settings, onChange, open }: {
       </Flex>
       {measurements.length ? (
         <Flex direction="column" gap="2" aria-live="polite">
-          <Text size="1" color="gray">Sample passage: {PASSAGE} · {language}</Text>
+          <Text size="1" color="gray">Sample passage: {PASSAGE} · {language}{learnerLevel ? ` · Dutch ${learnerLevel}` : ""}</Text>
           {measurements.map((row) => (
             <div key={row.model}>
               <Text size="1" weight="bold">{row.model}</Text>
@@ -107,6 +110,7 @@ export function ModelComparison({ settings, onChange, open }: {
                 <div key={sample.mode}>
                   <Text size="1">{sample.mode}: {(sample.durationMs / 1000).toFixed(1)}s · {sample.error || sample.result?.translation}</Text>
                   {sample.result?.explanation ? <Text as="p" size="1" color="gray">{sample.result.explanation}</Text> : null}
+                  {sample.result?.learningTip ? <Text as="p" size="1" color="teal">Worth knowing at {learnerLevel}: {sample.result.learningTip}</Text> : null}
                 </div>
               ))}
             </div>

@@ -147,6 +147,7 @@ export function makeLookupCacheKey(
   customPrompt = "",
   cueText = "",
   mode = "word",
+  learnerLevel = "",
 ) {
   return [
     model.trim(),
@@ -154,6 +155,7 @@ export function makeLookupCacheKey(
     normalizeTarget(targetText),
     normalizeTarget(cueText),
     mode,
+    learnerLevel ? `level:${learnerLevel}` : "",
     customPrompt.trim() ? `cp:${shortHash(customPrompt.trim())}` : "",
     // Refresh selection answers after changing their scope instructions;
     // keep the word and sentence caches from the previous release.

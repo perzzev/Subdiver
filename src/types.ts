@@ -10,10 +10,14 @@ export type SubtitleCue = {
   headingLevel?: number;
 };
 
+export const CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
+export type LearnerLevel = typeof CEFR_LEVELS[number];
+
 export type AppSettings = {
   apiKey: string;
   targetLanguage: string;
   model: string;
+  learnerLevel: LearnerLevel | "";
   persistApiKey: boolean;
   /**
    * Extra teacher instructions appended to every lookup and follow-up prompt.
@@ -34,6 +38,7 @@ export type LookupRequest = {
   targetLanguage: string;
   model: string;
   mode: LookupMode;
+  learnerLevel?: LearnerLevel;
 };
 
 export type LookupResult = {
@@ -41,6 +46,7 @@ export type LookupResult = {
   lemma?: string;
   partOfSpeech?: string;
   explanation: string;
+  learningTip?: string;
 };
 
 export type LookupState = {

@@ -8,7 +8,7 @@ import { Badge, Box, Button, Callout, Flex, Heading, IconButton, Popover, Text, 
 import { FileText, HelpCircle, Info } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { logDebug } from "./debug";
-import { requestFollowUp, requestLookup } from "./openai";
+import { getLearningHintLevel, requestFollowUp, requestLookup } from "./openai";
 import { getSampleUrl, sampleEpisodes, type SampleEpisode } from "./samples";
 import { loadSettings, saveSettings } from "./settings";
 import { formatTimestamp, parseSubtitleFile } from "./subtitles";
@@ -83,7 +83,7 @@ export default function App() {
   useEffect(() => {
     closeLookup();
     return () => lookupController.current?.abort();
-  }, [closeLookup, settings.apiKey, settings.model, settings.targetLanguage, settings.customPrompt]);
+  }, [closeLookup, settings.apiKey, settings.model, settings.targetLanguage, settings.customPrompt, settings.learnerLevel]);
 
   useAltPressed();
 
@@ -327,6 +327,7 @@ export default function App() {
         settings.customPrompt,
         request.cueText,
         request.mode,
+        getLearningHintLevel(request),
       );
       try {
         // Local storage failures should not prevent a translation.

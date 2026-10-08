@@ -15,7 +15,7 @@ import { ExternalLink, Info, Settings as SettingsIcon, Trash2 } from "lucide-rea
 import { useState } from "react";
 import { listOpenAiModels } from "../openai";
 import { defaultSettings } from "../settings";
-import type { AppSettings } from "../types";
+import { CEFR_LEVELS, type AppSettings, type LearnerLevel } from "../types";
 import { ModelComparison } from "./ModelComparison";
 
 const CUSTOM_PROMPT_PLACEHOLDER = [
@@ -112,6 +112,18 @@ export function SettingsDialog({
               onChange={(event) => onChange({ ...settings, targetLanguage: event.target.value })}
             />
           </label>
+          <label className="field-label" htmlFor="learner-level">
+            Your Dutch level (CEFR)
+          </label>
+          <select id="learner-level" aria-describedby="learner-level-help" value={settings.learnerLevel}
+            onChange={(event) => onChange({ ...settings, learnerLevel: event.target.value as LearnerLevel | "" })}>
+            <option value="">Not set · learning hints off</option>
+            {CEFR_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}
+          </select>
+          <Text id="learner-level-help" size="1" color="gray">
+            For single words, highlight common vocabulary worth knowing at your level.
+            Rare, literary and specialist terms stay unmarked. The hint is the teacher's estimate.
+          </Text>
           <div className="field-label">
             Model
             <Flex gap="2" align="center">

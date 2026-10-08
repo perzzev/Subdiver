@@ -29,3 +29,18 @@ it("preserves an explicit later choice of the old model and key storage preferen
   expect(loadSettings()).toMatchObject({ model: "gpt-5.5", apiKey: "" });
   expect(map.get("subdiver.settings")).not.toContain("test-only");
 });
+it("keeps learning hints off for older settings without a level", () => {
+  const map = mockStorage();
+  map.set("subdiver.settings", JSON.stringify({ model: "gpt-4.1-mini", targetLanguage: "Russian" }));
+  expect(loadSettings().learnerLevel).toBe("");
+});
+it("persists the learner's selected level", () => {
+  mockStorage();
+  saveSettings({ ...defaultSettings, learnerLevel: "B2" });
+  expect(loadSettings().learnerLevel).toBe("B2");
+});
+it.each(["B3", "b2", null, 2])("ignores invalid stored CEFR levels: %s", (learnerLevel) => {
+  const map = mockStorage();
+  map.set("subdiver.settings", JSON.stringify({ ...defaultSettings, learnerLevel }));
+  expect(loadSettings().learnerLevel).toBe("");
+});

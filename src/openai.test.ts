@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { requestFollowUp, requestLookup, WORD_PARTS_GUIDANCE } from "./openai";
+import { getLearningHintLevel, requestFollowUp, requestLookup, WORD_PARTS_GUIDANCE } from "./openai";
 import type { LookupRequest } from "./types";
 
 const request: LookupRequest = {
@@ -7,10 +7,53 @@ const request: LookupRequest = {
   cueText: "Hij belt mij op.", cueId: "one", cueStartMs: 0, cueEndMs: 1000, mode: "word",
 };
 const result = { translation: "звонит", lemma: "opbellen", partOfSpeech: "глагол", explanation: "Отделяемый глагол." };
+const advice = { frequency: "common", register: "general", level: "A2", tip: "Это частое слово стоит знать на B2." };
 function reply(data: unknown, status = 200) { return new Response(JSON.stringify(data), { status }); }
 afterEach(() => vi.unstubAllGlobals());
 
 describe("structured lookups", () => {
+  it("returns a separate learning hint for a single word with a level, preserving custom instructions", async () => {
+    const fetch = vi.fn().mockResolvedValue(reply({ output_text: JSON.stringify({ ...result, learningAdvice: { ...advice, tip: `  ${advice.tip}  ` } }) }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(requestLookup("test-key", { ...request, learnerLevel: "B2" }, { customPrompt: "Keep explanations simple." }))
+      .resolves.toEqual({ ...result, learningTip: "Это частое слово стоит знать на B2." });
+    const body = JSON.parse(fetch.mock.calls[0][1].body);
+    expect(body.text.format.schema.required).toContain("learningAdvice");
+    expect(body.text.format.schema.additionalProperties).toBe(false);
+    expect(body.input).toContain("Keep explanations simple.");
+    expect(body.input).toContain("independently of any learner level");
+    expect(body.input).not.toContain("B2.");
+  });
+  it("leaves the learning hint absent when the teacher returns an empty string", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply({ output_text: JSON.stringify({ ...result, learningAdvice: { ...advice, tip: " " } }) })));
+    await expect(requestLookup("test-key", { ...request, learnerLevel: "B2" })).resolves.toEqual(result);
+  });
+  it.each([undefined, null, true, { ...advice, tip: null }, { ...advice, register: "whatever" }, { ...advice, level: "B3" }])("rejects malformed learning advice: %j", async (learningAdvice) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply({ output_text: JSON.stringify({ ...result, learningAdvice }) })));
+    await expect(requestLookup("test-key", { ...request, learnerLevel: "B2" })).rejects.toThrow(/invalid lookup format/);
+  });
+  it.each([
+    { frequency: "uncommon" }, { frequency: "uncertain" },
+    { register: "literary" }, { register: "archaic" }, { register: "specialist" }, { register: "proper_name" }, { register: "uncertain" },
+    { level: "C1" }, { level: "uncertain" },
+  ])("hides enthusiastic tips for ineligible words: %j", async (classification) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply({ output_text: JSON.stringify({ ...result, learningAdvice: { ...advice, ...classification } }) })));
+    await expect(requestLookup("test-key", { ...request, learnerLevel: "B2" })).resolves.toEqual(result);
+  });
+  it.each([
+    { ...request },
+    { ...request, mode: "sentence" as const, learnerLevel: "B2" as const },
+    { ...request, mode: "selection" as const, targetText: "rekening mee", learnerLevel: "B2" as const },
+  ])("does not request or expose a hint outside a single-word lookup with a level", async (lookup) => {
+    const fetch = vi.fn().mockResolvedValue(reply({ output_text: JSON.stringify({ ...result, learningAdvice: advice }) }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(requestLookup("test-key", lookup)).resolves.toEqual(result);
+    expect(JSON.parse(fetch.mock.calls[0][1].body).text.format.schema.required).not.toContain("learningAdvice");
+  });
+  it("recognizes a highlighted single word without treating a phrase or sentence as one", () => {
+    expect(getLearningHintLevel({ ...request, mode: "selection", targetText: "zo'n", learnerLevel: "A2" })).toBe("A2");
+    expect(getLearningHintLevel({ ...request, mode: "selection", targetText: "Hij belt.", learnerLevel: "B2" })).toBeUndefined();
+  });
   it.each(["word", "sentence", "selection"] as const)("keeps personal instructions and adds word-parts guidance only for clicked words: %s", async (mode) => {
     const fetch = vi.fn().mockResolvedValue(reply({ output_text: JSON.stringify(result) }));
     vi.stubGlobal("fetch", fetch);

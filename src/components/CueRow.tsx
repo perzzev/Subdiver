@@ -49,6 +49,7 @@ export const CueRow = memo(function CueRow({
       cueEndMs: cue.endMs,
       targetLanguage: settings.targetLanguage,
       model: settings.model,
+      learnerLevel: settings.learnerLevel || undefined,
       mode,
     };
   }

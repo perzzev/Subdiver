@@ -1,4 +1,4 @@
-import type { EpisodeChatMessage, FollowUpMessage, LookupRequest, LookupResult } from "./types";
+import type { EpisodeChatMessage, FollowUpMessage, LearnerLevel, LookupRequest, LookupResult } from "./types";
 
 type ResponsesApiResult = {
   status?: string;
@@ -41,21 +41,54 @@ const LOOKUP_FORMAT = {
 
 class IncompleteResponseError extends Error {}
 
+const LEVEL_ORDER = { A1: 0, A2: 1, B1: 2, B2: 3, C1: 4, C2: 5 };
+const FREQUENCIES = ["common", "uncommon", "uncertain"];
+const REGISTERS = ["general", "literary", "archaic", "specialist", "proper_name", "uncertain"];
+const ADVICE_LEVELS = [...Object.keys(LEVEL_ORDER), "uncertain"];
+const LEARNING_ADVICE_SCHEMA = {
+  type: "object",
+  properties: {
+    frequency: { type: "string", enum: FREQUENCIES },
+    register: { type: "string", enum: REGISTERS },
+    level: { type: "string", enum: ADVICE_LEVELS },
+    tip: { type: "string" },
+  },
+  required: ["frequency", "register", "level", "tip"],
+  additionalProperties: false,
+};
+
+/** A clicked word or a one-word selection can receive a learning priority hint. */
+export function getLearningHintLevel(request: Pick<LookupRequest, "mode" | "targetText" | "learnerLevel">): LearnerLevel | undefined {
+  const singleWord = request.mode === "word" || (request.mode === "selection" && /^[\p{L}\p{M}]+(?:['’-][\p{L}\p{M}]+)*$/u.test(request.targetText.trim()));
+  return singleWord && request.learnerLevel && /^(A[12]|B[12]|C[12])$/.test(request.learnerLevel) ? request.learnerLevel : undefined;
+}
+
 export async function requestLookup(
   apiKey: string,
   request: LookupRequest,
   options: PromptOptions = {},
 ): Promise<LookupResult> {
   const input = buildLookupPrompt(request, options);
+  const learnerLevel = getLearningHintLevel(request);
+  const withLearningTip = Boolean(learnerLevel);
+  const format = withLearningTip ? {
+    ...LOOKUP_FORMAT,
+    name: "dutch_lookup_with_learning_tip",
+    schema: {
+      ...LOOKUP_FORMAT.schema,
+      properties: { ...LOOKUP_FORMAT.schema.properties, learningAdvice: LEARNING_ADVICE_SCHEMA },
+      required: [...LOOKUP_FORMAT.schema.required, "learningAdvice"],
+    },
+  } : LOOKUP_FORMAT;
   try {
-    const data = await callResponsesApi(apiKey, request.model, input, options.signal, LOOKUP_FORMAT);
-    return parseLookupResult(extractOutputText(data));
+    const data = await callResponsesApi(apiKey, request.model, input, options.signal, format);
+    return parseLookupResult(extractOutputText(data), learnerLevel);
   } catch (error) {
     // Retry only a truncated response, once. Never retry cancellations, refusals,
     // authorization or rate-limit errors, or quietly change the chosen model.
     if (!(error instanceof IncompleteResponseError) || options.signal?.aborted) throw error;
-    const data = await callResponsesApi(apiKey, request.model, input, options.signal, LOOKUP_FORMAT, 2400);
-    return parseLookupResult(extractOutputText(data));
+    const data = await callResponsesApi(apiKey, request.model, input, options.signal, format, 2400);
+    return parseLookupResult(extractOutputText(data), learnerLevel);
   }
 }
 
@@ -204,6 +237,18 @@ export const TEACHER_GUIDANCE = `${PREVIOUS_TEACHER_GUIDANCE}\n${WORD_PARTS_GUID
 
 function buildLookupPrompt(request: LookupRequest, options: PromptOptions) {
   const teacher = ((options.customPrompt ?? "").trim() || TEACHER_GUIDANCE);
+  const level = getLearningHintLevel(request);
+  const learningInstructions = level ? [
+    "Assess the selected word, in its contextual meaning or construction, independently of any learner level. The application will compare your assessment with the learner's saved level; do not assume a learner level yourself.",
+    "First classify learningAdvice.register independently of the learner's level: general, literary, archaic, specialist, proper_name or uncertain. Everyday vocabulary such as boodschappen and werken is general; gijlieden is archaic; gluconeogenese is specialist. A word appearing in this passage does not make it generally useful.",
+    "Then classify learningAdvice.frequency as common, uncommon or uncertain in CURRENT general Dutch, not just within a profession or in old literature. Use learningAdvice.level to estimate the earliest CEFR level where the contextual meaning is useful: A1, A2, B1, B2, C1, C2, or uncertain.",
+    "Estimate the word's level independently of the learner. Do not lower its level to make a recommendation: a common word can still be too advanced for a beginner. A1 covers basic concrete everyday vocabulary; A2 routine everyday needs; B1 everyday narratives and common connections between ideas; B2 more abstract topics and general news; C1 advanced nuanced language; C2 highly nuanced language. If you cannot confidently estimate it, use uncertain.",
+    "Supply a learning tip ONLY when frequency is common AND register is general AND the estimated level is known. Rare, literary, archaic and specialist words are NEVER eligible. When uncertain about any criterion, use uncertain and an empty tip.",
+    "Do not recommend a rare technical meaning merely because another meaning of the spelling is common. Classify the actual contextual meaning.",
+    `- learningAdvice.tip: ONLY after those three checks pass, write one short encouraging sentence (at most 25 words) in ${request.targetLanguage}, explaining why this is common, useful vocabulary worth learning. Do not mention a learner level; the application adds it. Otherwise return an empty string; give no negative or 'not worth learning' note.`,
+    "CEFR is a learning-priority estimate here, not an official classification of this word. Do not invent frequency statistics or claim an official CEFR word list.",
+  ] : [];
+  const shape = (sentence = false) => JSON.stringify({ translation: "...", lemma: sentence ? "" : "...", partOfSpeech: sentence ? "sentence" : "...", explanation: "...", ...(level ? { learningAdvice: { frequency: "...", register: "...", level: "...", tip: "... or empty string" } } : {}) });
 
   if (request.mode === "sentence" || request.mode === "selection") {
     const selection = request.mode === "selection";
@@ -227,12 +272,11 @@ function buildLookupPrompt(request: LookupRequest, options: PromptOptions) {
       "",
       "Return only valid JSON, no Markdown, no code fences.",
       "Return exactly this JSON shape:",
-      selection
-        ? '{"translation":"...","lemma":"...","partOfSpeech":"...","explanation":"..."}'
-        : '{"translation":"...","lemma":"","partOfSpeech":"sentence","explanation":"..."}',
+      shape(!selection),
       "- translation: the complete natural, idiomatic translation, not literal. Preserve the sentence boundaries.",
       ...(selection ? ["- lemma and partOfSpeech: for a word or short phrase, give its dictionary form and classification when useful. For multiple sentences, leave lemma empty and classify it as selected text in the target language."] : []),
       "- explanation: one or two short sentences explaining the grammar / idiom that matters here.",
+      ...learningInstructions,
     ].join("\n");
   }
 
@@ -250,7 +294,7 @@ function buildLookupPrompt(request: LookupRequest, options: PromptOptions) {
     "",
     "Return only valid JSON, no Markdown, no code fences.",
     "Return exactly this JSON shape:",
-    '{"translation":"...","lemma":"...","partOfSpeech":"...","explanation":"..."}',
+    shape(),
     "- translation: the meaning of the selected text *as it actually functions in this sentence*.",
     "  If it is part of a separable verb, idiom, or fixed expression, translate the WHOLE construction",
     "  and indicate which extra words belong to it (e.g. \"to do something about it — pairs with 'aan'\").",
@@ -260,6 +304,7 @@ function buildLookupPrompt(request: LookupRequest, options: PromptOptions) {
     "  construction, say so explicitly (e.g. \"глагол (часть отделяемого aandoen)\").",
     "- explanation: one or two short sentences, including a brief word-parts breakdown for a clicked word when useful. Highlight what is non-obvious for a learner —",
     "  separated prefix, idiom, register, false-friend pitfall, irregular form.",
+    ...learningInstructions,
   ].join("\n");
 }
 
@@ -274,7 +319,7 @@ function extractOutputText(data: ResponsesApiResult) {
   return chunks.join("\n").trim();
 }
 
-function parseLookupResult(text: string): LookupResult {
+function parseLookupResult(text: string, learnerLevel?: LearnerLevel): LookupResult {
   const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
   if (!cleaned) {
     throw new Error("The model returned an empty response. Nothing was cached; try again or choose another model.");
@@ -286,11 +331,27 @@ function parseLookupResult(text: string): LookupResult {
       typeof parsed.translation !== "string" || !parsed.translation.trim() ||
       typeof parsed.lemma !== "string" || typeof parsed.partOfSpeech !== "string" ||
       typeof parsed.explanation !== "string") throw new Error("Invalid lookup fields");
+    let learningTip: string | undefined;
+    if (learnerLevel) {
+      const advice = parsed.learningAdvice as Record<string, unknown> | undefined;
+      if (!advice || typeof advice !== "object" || Array.isArray(advice) ||
+        typeof advice.frequency !== "string" || !FREQUENCIES.includes(advice.frequency) ||
+        typeof advice.register !== "string" || !REGISTERS.includes(advice.register) ||
+        typeof advice.level !== "string" || !ADVICE_LEVELS.includes(advice.level) ||
+        typeof advice.tip !== "string") throw new Error("Invalid learning advice");
+      // Enforce the eligibility rules even if the model supplies an enthusiastic
+      // tip for a word it has classified as rare, literary or above this level.
+      if (advice.frequency === "common" && advice.register === "general" && advice.level !== "uncertain" &&
+        LEVEL_ORDER[advice.level as LearnerLevel] <= LEVEL_ORDER[learnerLevel]) {
+        learningTip = advice.tip.trim() || undefined;
+      }
+    }
     return {
       translation: parsed.translation.trim(),
       lemma: parsed.lemma || undefined,
       partOfSpeech: parsed.partOfSpeech || undefined,
       explanation: parsed.explanation,
+      ...(learningTip ? { learningTip } : {}),
     };
   } catch {
     throw new Error("The model returned an invalid lookup format. Nothing was cached; try again.");

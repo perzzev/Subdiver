@@ -1,5 +1,5 @@
 import { PREVIOUS_TEACHER_GUIDANCE, TEACHER_GUIDANCE } from "./openai";
-import type { AppSettings } from "./types";
+import { CEFR_LEVELS, type AppSettings } from "./types";
 
 const SETTINGS_KEY = "subdiver.settings";
 const LEGACY_SETTINGS_KEY = "ondertiteling.settings";
@@ -8,6 +8,7 @@ export const defaultSettings: AppSettings = {
   apiKey: "",
   targetLanguage: "Russian",
   model: "gpt-4.1-mini",
+  learnerLevel: "",
   persistApiKey: true,
   customPrompt: TEACHER_GUIDANCE,
 };
@@ -18,6 +19,7 @@ export function loadSettings(): AppSettings {
     if (!raw) return defaultSettings;
     const saved = JSON.parse(raw) as Partial<AppSettings> & { modelDefaultsVersion?: number };
     const merged = { ...defaultSettings, ...saved } as AppSettings;
+    if (!CEFR_LEVELS.includes(merged.learnerLevel as typeof CEFR_LEVELS[number])) merged.learnerLevel = "";
     // Upgrade the old expensive default once. A later explicit model choice,
     // including GPT-5.5, is preserved by saveSettings's version marker.
     if (!saved.modelDefaultsVersion && merged.model === "gpt-5.5") {

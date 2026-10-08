@@ -84,3 +84,9 @@ it("separates cached meanings by passage and lookup mode", () => {
   expect(key("Een bank.")).not.toBe(key("Een bank.", "sentence"));
   expect(key("Ik zit op de bank.")).toBe(key("Ik zit op de bank."));
 });
+it("separates level-specific learning hints while preserving lookups without a level", () => {
+  const key = (level?: string) => makeLookupCacheKey("model", "Russian", "bank", "", "Ik werk bij de bank.", "word", level);
+  expect(key("B2")).not.toBe(key("A1"));
+  expect(key("B2")).not.toBe(key());
+  expect(key()).toBe(key(""));
+});

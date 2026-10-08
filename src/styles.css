@@ -932,7 +932,8 @@ body[data-alt-mode] .word-token:hover {
   font-size: 13px;
 }
 
-.chapter-navigation select {
+.chapter-navigation select,
+#learner-level {
   width: 100%;
   min-width: 0;
   padding: 10px 28px 10px 10px;
