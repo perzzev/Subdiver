@@ -307,6 +307,7 @@ export default function App() {
       const startedAt = performance.now();
       window.getSelection()?.removeAllRanges();
       setAppError("");
+      setChatOpen(false);
       setLookup({ request, loading: true, fromCache: false });
 
       if (!settings.apiKey.trim()) {
@@ -525,8 +526,10 @@ export default function App() {
   }, [transcript]);
 
   const handleJumpToCue = useCallback((cueId: string) => {
+    setChatOpen(false);
+    closeLookup();
     setPendingScrollCueId(cueId);
-  }, []);
+  }, [closeLookup]);
 
   async function resetCache() {
     closeLookup();
@@ -681,6 +684,7 @@ export default function App() {
 
           {transcript ? (
             <EpisodeChatPanel
+              key={makeTranscriptKey(transcript)}
               contentLabel={transcript.kind === "epub" ? "book" : "episode"}
               open={chatOpen}
               conversations={conversations}

@@ -84,7 +84,7 @@ test("EPUB words, sentences, selections, chat, pagination and progress survive r
   // A saved chat reference can reopen a passage on another section.
   await page.getByTitle("Jump back to that passage").click();
   await expect(page.locator(".chapter-navigation")).toContainText("Section 1 of 3");
-  await page.getByRole("button", { name: "Close chat panel" }).click();
+  await expect(page.getByRole("button", { name: "Close chat panel" })).toBeHidden();
   await page.getByLabel("Chapter", { exact: true }).selectOption("1");
   await expect(page.locator(".transcript")).toContainText("Wij lezen samen een boek.");
   await expect(page.getByRole("button", { name: "Next", exact: true })).toBeDisabled();

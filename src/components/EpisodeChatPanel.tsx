@@ -1,6 +1,6 @@
 import { Box, Button, Flex, Heading, IconButton, ScrollArea, Separator, Spinner, Text, TextArea } from "@radix-ui/themes";
 import { CornerUpLeft, PanelRightClose, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatConversation } from "../types";
 
 type Props = {
@@ -30,7 +30,14 @@ export function EpisodeChatPanel({
   onClear,
   onJumpToCue,
 }: Props) {
-  const [draft, setDraft] = useState("");
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const draft = activeConversationId ? drafts[activeConversationId] ?? "" : "";
+  function setDraft(value: string) {
+    if (activeConversationId) setDrafts(previous => ({ ...previous, [activeConversationId]: value }));
+  }
+  const panelRef = useRef<HTMLElement>(null);
+  const focusOriginRef = useRef<HTMLElement | null>(null);
+  const threadsRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -41,19 +48,51 @@ export function EpisodeChatPanel({
   const messages = activeConversation?.messages ?? [];
   const hasHistory = conversations.some((c) => c.messages.length > 0);
 
-  // Focus the composer when the panel opens or the learner switches threads.
+  const closePanel = useCallback(() => {
+    const restoreFocus = panelRef.current?.contains(document.activeElement);
+    onClose();
+    if (restoreFocus) requestAnimationFrame(() => {
+      const origin = focusOriginRef.current;
+      const target = origin?.isConnected ? origin : document.querySelector<HTMLElement>('[aria-controls="reader-chat"]');
+      target?.focus({ preventScroll: true });
+    });
+  }, [onClose]);
+
+  // Focus on opening; keep keyboard focus on the tabs when switching threads.
   useEffect(() => {
     if (!open) return;
+    // Ask follow-up unmounts its button before this effect runs.
+    focusOriginRef.current = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+      ? document.activeElement : null;
     const id = window.setTimeout(() => {
-      composerRef.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+      composerRef.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus({ preventScroll: true });
     }, 200);
     return () => window.clearTimeout(id);
-  }, [open, activeConversationId]);
+  }, [open]);
 
-  // Switching threads should not carry a half-typed question across.
   useEffect(() => {
-    setDraft("");
-  }, [activeConversationId]);
+    if (!open) return;
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        event.preventDefault();
+        closePanel();
+      }
+    }
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [open, closePanel]);
+
+  useEffect(() => {
+    if (!open) return;
+    const strip = threadsRef.current;
+    const active = strip?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!strip || !active) return;
+    // Scroll only the strip, so switching threads never moves the book.
+    const item = active.getBoundingClientRect();
+    const bounds = strip.getBoundingClientRect();
+    if (item.left < bounds.left) strip.scrollLeft -= bounds.left - item.left + 12;
+    else if (item.right > bounds.right) strip.scrollLeft += item.right - bounds.right + 12;
+  }, [open, activeConversationId, conversations.length]);
 
   useEffect(() => {
     const viewport = scrollRef.current?.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
@@ -68,7 +107,7 @@ export function EpisodeChatPanel({
   }
 
   return (
-    <aside className={`side-panel ${open ? "open" : ""}`} aria-hidden={!open} inert={!open}>
+    <aside id="reader-chat" ref={panelRef} className={`side-panel ${open ? "open" : ""}`} aria-label={contentLabel === "book" ? "Book chat" : "Episode chat"} aria-hidden={!open} inert={!open}>
       <Flex align="center" justify="between" p="4">
         <Heading as="h2" size="4">
           {contentLabel === "book" ? "Book chat" : "Episode chat"}
@@ -84,7 +123,7 @@ export function EpisodeChatPanel({
           >
             <Trash2 size={16} />
           </IconButton>
-          <IconButton variant="ghost" onClick={onClose} aria-label="Close chat panel">
+          <IconButton variant="ghost" onClick={closePanel} aria-label="Close chat panel">
             <PanelRightClose size={18} />
           </IconButton>
         </Flex>
@@ -93,7 +132,7 @@ export function EpisodeChatPanel({
 
       <div className="chat-subhead">
         {conversations.length > 0 ? (
-          <div className="thread-strip" role="tablist" aria-label="Question threads">
+          <div className="thread-strip" ref={threadsRef} role="tablist" aria-label="Question threads">
             {conversations.map((conversation) => {
               const label = conversation.contextSelection?.trim() || "New question";
               const isActive = conversation.id === activeConversationId;
@@ -103,11 +142,22 @@ export function EpisodeChatPanel({
                   type="button"
                   role="tab"
                   aria-selected={isActive}
+                  tabIndex={isActive ? 0 : -1}
                   className={`thread-chip ${isActive ? "active" : ""}`}
                   title={label}
                   onClick={() => onSelectConversation(conversation.id)}
+                  onKeyDown={event => {
+                    const index = conversations.findIndex(item => item.id === conversation.id);
+                    const next = event.key === "Home" ? 0 : event.key === "End" ? conversations.length - 1
+                      : event.key === "ArrowRight" ? (index + 1) % conversations.length
+                      : event.key === "ArrowLeft" ? (index - 1 + conversations.length) % conversations.length : undefined;
+                    if (next === undefined) return;
+                    event.preventDefault();
+                    onSelectConversation(conversations[next].id);
+                    threadsRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus({ preventScroll: true });
+                  }}
                 >
-                  {label}
+                  <span className="thread-chip-label">{label}</span>
                   {conversation.messages.length > 0 ? (
                     <span className="thread-chip-count">{conversation.messages.length}</span>
                   ) : (
@@ -123,7 +173,7 @@ export function EpisodeChatPanel({
           <Box p="4" className="context-card">
             <Flex justify="between" align="start" gap="2">
               <Box style={{ minWidth: 0 }}>
-                <Text size="1" color="gray">
+                <Text as="div" size="1" color="gray" className="context-label">
                   About
                 </Text>
                 <button
@@ -135,7 +185,7 @@ export function EpisodeChatPanel({
                   title={activeConversation.contextCueId ? "Jump back to that passage" : undefined}
                   disabled={!activeConversation.contextCueId}
                 >
-                  {activeConversation.contextSelection?.trim() || "General question"}
+                  <span>{activeConversation.contextSelection?.trim() || "General question"}</span>
                   {activeConversation.contextCueId ? <CornerUpLeft size={13} /> : null}
                 </button>
                 {activeConversation.contextCueText ? (

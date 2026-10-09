@@ -141,7 +141,7 @@ export function Reader({
               {isBook ? [transcript.author, `${chapters.length} chapters`].filter(Boolean).join(" · ") : `${cues.length} cues`}
             </Text>
           </Flex>
-          <Button variant="surface" onClick={onToggleChat}>
+          <Button variant="surface" onClick={onToggleChat} aria-controls="reader-chat" aria-expanded={chatOpen}>
             <MessageSquareText size={16} />
             {isBook ? "Book chat" : "Episode chat"}
             {chatBadge && chatBadge > 0 ? (

@@ -637,6 +637,9 @@ body[data-alt-mode] .word-token:hover {
 
 .chat-subhead {
   min-width: 0;
+  max-height: min(30dvh, 240px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* ----- thread switcher ----- */
@@ -693,6 +696,12 @@ body[data-alt-mode] .word-token:hover {
   text-align: center;
 }
 
+.thread-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .thread-chip-new {
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -701,6 +710,10 @@ body[data-alt-mode] .word-token:hover {
 .context-card {
   border-bottom: 1px solid var(--border);
   background: var(--surface-soft);
+}
+
+.context-label {
+  margin-bottom: 4px;
 }
 
 .context-subject {
@@ -722,6 +735,14 @@ body[data-alt-mode] .word-token:hover {
 
 .context-subject:disabled {
   cursor: default;
+}
+
+.context-subject span {
+  min-width: 0;
+}
+
+.context-subject svg {
+  flex-shrink: 0;
 }
 
 .context-subject:not(:disabled):hover {
