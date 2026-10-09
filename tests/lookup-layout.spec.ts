@@ -8,6 +8,49 @@ async function geometry(word: Locator) {
 }
 
 for (const viewport of [
+  { name: "laptop", theme: "cinema", width: 1280, height: 900 },
+  { name: "tablet", theme: "reader", width: 1024, height: 768 },
+  { name: "phone", theme: "cinema", width: 390, height: 844 },
+  { name: "small-phone", theme: "warm", width: 320, height: 640 },
+]) {
+  test(`${viewport.name}: long grammar badges stay readable without horizontal scrolling`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.addInitScript(({ theme }) => {
+      localStorage.setItem("subdiver.theme", theme);
+      localStorage.setItem("subdiver.settings", JSON.stringify({ apiKey: "test-only", model: "gpt-4.1-mini", targetLanguage: "Russian", learnerLevel: "B2" }));
+    }, viewport);
+    const partOfSpeech = "существительное (здесь: 'een zwak voor iemand hebben' — часть устойчивого выражения, означающего симпатию или привязанность к кому-либо; используется как существительное со значением 'слабость', а не как прилагательное 'слабый')";
+    const lemma = "een zwak voor iemand hebben";
+    await page.route("https://api.openai.com/v1/responses", async (route) => {
+      await route.fulfill({ json: { output_text: JSON.stringify({
+        translation: "слабость к кому-то (нежное чувство, симпатия)", lemma, partOfSpeech,
+        explanation: "В этом контексте 'een zwak voor iemand hebben' — устойчивое выражение, означающее иметь тёплое, нежное чувство или симпатию к кому-либо. 'Zwak' буквально значит 'слабый', но здесь это существительное, обозначающее 'слабость'.",
+        learningAdvice: { frequency: "common", register: "general", level: "B1", tip: "Это устойчивое выражение часто используется в разговорной речи для описания симпатии или привязанности." },
+      }) } });
+    });
+    await page.goto("/");
+    await page.getByLabel("Upload a book or subtitles").setInputFiles({ name: "zwak.srt", mimeType: "text/plain", buffer: Buffer.from("1\n00:00:01,000 --> 00:00:03,000\nIk heb een zwak voor je vader.\n") });
+    const word = page.locator(".word-token").filter({ hasText: /^zwak$/ });
+    await expect(word).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    const before = await geometry(word);
+    await word.click();
+    const panel = page.getByRole("dialog", { name: "Translation", exact: true });
+    await expect(panel).toContainText(partOfSpeech);
+    await expect(panel).toHaveCSS("opacity", "1");
+    const badge = panel.locator(".rt-Badge").filter({ hasText: partOfSpeech });
+    expect(await badge.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(await panel.locator(".lookup-panel-content").evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(await badge.evaluate(element => element.getBoundingClientRect().height > parseFloat(getComputedStyle(element).lineHeight) * 1.5)).toBe(true);
+    expect(await geometry(word)).toEqual(before);
+    await panel.getByRole("button", { name: "Ask follow-up" }).scrollIntoViewIfNeeded();
+    await expect(panel.getByRole("button", { name: "Ask follow-up" })).toBeVisible();
+    await panel.locator(".lookup-panel-content").evaluate(element => { element.scrollTop = 0; });
+    await panel.screenshot({ path: `test-results/grammar-badge-${viewport.name}.png` });
+  });
+}
+
+for (const viewport of [
   { name: "laptop", width: 1280, height: 900 },
   { name: "tablet", width: 1024, height: 768 },
   { name: "phone", width: 390, height: 844 },

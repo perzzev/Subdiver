@@ -536,6 +536,7 @@ body[data-alt-mode] .word-token:hover {
 
 .lookup-panel-content {
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -555,6 +556,10 @@ body[data-alt-mode] .word-token:hover {
 }
 
 .lookup-panel-body .rt-Badge {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 1;
   white-space: normal;
   overflow-wrap: anywhere;
 }
